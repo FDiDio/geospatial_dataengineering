@@ -1,6 +1,6 @@
-# Geospatial Data Engineering
+# Geospatial Data Engineering assessment
 
-The implementation follows a **daily iterative** approach to process the precipitation data, considering both the nature of the source files and memory constraints. 
+The implementation of this assessment follows a **daily iterative** approach to process the precipitation data, considering both the nature of the source files and memory constraints. 
 
 The files, stored in Google Cloud Storage, are downloaded with a daily granularity based on the specified date interval. This iterative processing minimizes memory consumption, as processing large datasets (in this case a full year of data, potentially spanning multiple gigabytes) could result in memory bottlenecks.
 

@@ -1,0 +1,22 @@
+# Configuration File for Precipitation Data ETL Pipeline
+
+# Path to the Google Cloud Storage bucket containing the input data
+bucket_path: "gcp-public-data-arco-era5/raw/date-variable-single_level/"
+
+# Directory path where the output Parquet files will be saved
+output_path: "../output/total_precipitation"
+
+# Directory path where the query results will be saved
+query_output_path: "../output/total_precipitation/query_results"
+
+# H3 Resolution
+# The resolution of H3 indices to be used for geospatial indexing (integer value).
+h3_resolution: 5
+
+# Data Variable Configuration
+# The name of the variable to extract from the dataset, e.g., 'total_precipitation' for total precipitation.
+variable_name: "total_precipitation"
+
+# File Name
+# The name of the file to process within the bucket for each date (e.g., 'surface.nc').
+file_name: "surface.nc"
