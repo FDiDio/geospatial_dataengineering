@@ -1,10 +1,21 @@
 import logging
 import os
+from collections.abc import Sequence
+from typing import Any, Protocol
 
+import pandas as pd
 import pyarrow as pa
+import pyarrow.dataset as ds
 import pyarrow.parquet as pq
 
+from utils.filters import Condition, to_arrow_expression
+
 logger = logging.getLogger(__name__)
+
+SINKS = ("parquet", "iceberg")
+
+# Hive-style partitioning written by daily_output_path
+PARTITIONING = ds.partitioning(pa.schema([("year", pa.int16()), ("month", pa.int8())]), flavor="hive")
 
 
 def write_parquet_atomic(df, output_filename):
@@ -80,3 +91,53 @@ def save_query_results_to_parquet(df, query_name, output_dir):
     output_filename = os.path.join(output_dir, f"{query_name}.parquet")
     write_parquet_atomic(df, output_filename)
     logger.info("Saved query results to %s", output_filename)
+
+
+class Sink(Protocol):
+    """Where the processed variable-days are stored and queried."""
+
+    def exists(self, variable_name: str, year: int, month: int, day: int) -> bool:
+        """Return True if the variable-day has already been written."""
+        ...
+
+    def write(self, df: pd.DataFrame, variable_name: str, year: int, month: int, day: int) -> None:
+        """Write a variable-day, replacing it if it exists."""
+        ...
+
+    def read(
+        self, variable_name: str, conditions: Sequence[Condition], columns: list[str] | None = None
+    ) -> pa.Table | None:
+        """Return the rows matching all the conditions, or None if the variable has no data yet."""
+        ...
+
+
+class ParquetSink:
+    """Hive-partitioned Parquet datasets, one per variable: <output_path>/<variable>/year=YYYY/month=MM."""
+
+    def __init__(self, output_path: str):
+        self.output_path = output_path
+
+    def exists(self, variable_name: str, year: int, month: int, day: int) -> bool:
+        return os.path.exists(daily_output_path(self.output_path, variable_name, year, month, day))
+
+    def write(self, df: pd.DataFrame, variable_name: str, year: int, month: int, day: int) -> None:
+        save_data_to_parquet(df, self.output_path, variable_name, year, month, day)
+
+    def read(
+        self, variable_name: str, conditions: Sequence[Condition], columns: list[str] | None = None
+    ) -> pa.Table | None:
+        directory = dataset_path(self.output_path, variable_name)
+        if not os.path.isdir(directory):
+            return None
+        dataset = ds.dataset(directory, format="parquet", partitioning=PARTITIONING)
+        return dataset.to_table(filter=to_arrow_expression(conditions), columns=columns)
+
+
+def build_sink(config: dict[str, Any]) -> Sink:
+    """Return the sink selected by the 'sink' configuration key."""
+    if config["sink"] == "iceberg":
+        # pyiceberg is imported only when the Iceberg sink is used
+        from utils.iceberg_sink import IcebergSink
+
+        return IcebergSink.from_config(config)
+    return ParquetSink(config["output_path"])

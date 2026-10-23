@@ -12,7 +12,7 @@ dependencies = [
     "pandas>=3.0",
     "pandera>=0.26",
     "pyarrow>=20",
-    "pyiceberg[pyarrow,sql-sqlite]>=0.10",
+    "pyiceberg[pyarrow,pyiceberg-core,sql-sqlite]>=0.10",
     "pyyaml>=6.0",
     "scipy>=1.15",
     "xarray>=2025.1",
@@ -24,6 +24,7 @@ dev = [
     "mypy>=1.15",
     "pandas-stubs>=2.2",
     "pre-commit>=4.0",
+    "psutil>=6.0",
     "pytest>=8.3",
     "ruff>=0.11",
     "types-pyyaml>=6.0",
@@ -61,6 +62,7 @@ markers = [
     "network: tests reading the public ERA5 bucket, skipped unless selected with -m network",
 ]
 addopts = "-m 'not network'"
+filterwarnings = ["ignore:Delete operation did not match any records:UserWarning"]
 
 [tool.ruff]
 line-length = 120

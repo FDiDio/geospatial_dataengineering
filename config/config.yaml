@@ -2,12 +2,38 @@
 # Relative paths are resolved against the directory containing this file,
 # so the pipeline can be launched from any working directory.
 
-# Path to the Google Cloud Storage bucket containing the input data
+# Source of the hourly ERA5 fields:
+#   netcdf: the daily NetCDF files of bucket_path, one ~50 MB file per field and day
+#   zarr:   the analysis-ready ARCO-ERA5 Zarr store, reading only the chunks of the requested days
+source: netcdf
+
+# Path to the Google Cloud Storage bucket containing the daily NetCDF files
 bucket_path: "gcp-public-data-arco-era5/raw/date-variable-single_level/"
 
-# Root directory of the output Parquet files.
-# Each variable is written to its own dataset: <output_path>/<variable>/year=YYYY/month=MM
+# Zarr store read when source is zarr
+zarr_store: "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
+
+# fsspec options of the GCS filesystem. The ERA5 bucket is public: anonymous access
+# skips the lookup of Google credentials, which costs ~25 s per file when none are configured.
+storage_options:
+  token: anon
+
+# Storage of the processed data:
+#   parquet: Hive-partitioned Parquet files, <output_path>/<variable>/year=YYYY/month=MM
+#   iceberg: Apache Iceberg tables <iceberg_namespace>.<variable>, partitioned by day
+sink: parquet
+
+# Root directory of the output Parquet files
 output_path: "../output"
+
+# Iceberg sink: a local SQLite catalog and the table files, in the warehouse directory
+iceberg_warehouse_path: "../output/iceberg"
+iceberg_namespace: era5
+# Any other pyiceberg catalog can be used instead of the local one, e.g. a REST catalog:
+# iceberg_catalog:
+#   type: rest
+#   uri: https://iceberg-catalog.example.com
+#   warehouse: gs://my-bucket/warehouse
 
 # Directory path where the query results will be saved
 query_output_path: "../output/query_results"
@@ -32,6 +58,12 @@ file_name: "surface.nc"
 
 # Number of attempts for each daily download before the day is marked as failed
 max_retries: 3
+
+# Variable-days processed in parallel by worker threads (each holds a day in memory, ~1.5 GB)
+workers: 4
+
+# Data contract: share of missing values above which a variable-day is rejected
+max_null_fraction: 0.01
 
 # Sample Queries
 # Each query targets one variable and supports any combination of the following filters:

@@ -1,10 +1,11 @@
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 import h3
 import pandas as pd
 
 from utils import h3_processor
-from utils.h3_processor import enrich_with_h3, lookup_file_path, precompute_h3_index_lookup
+from utils.h3_processor import H3Enricher, enrich_with_h3, lookup_file_path, precompute_h3_index_lookup
 
 
 def test_lookup_matches_h3(precipitation_df):
@@ -37,3 +38,21 @@ def test_enrich_recomputes_when_grid_changes(precipitation_df, tmp_path):
 
     assert df["h3_index"].notna().all()
     assert len(new_lookup) > len(lookup)
+
+
+def test_enricher_computes_the_lookup_once_for_concurrent_workers(precipitation_df, tmp_path, monkeypatch):
+    computed = []
+    original = h3_processor.precompute_h3_index_lookup
+
+    def counting_precompute(df, resolution):
+        computed.append(resolution)
+        return original(df, resolution)
+
+    monkeypatch.setattr(h3_processor, "precompute_h3_index_lookup", counting_precompute)
+    enricher = H3Enricher(5, str(tmp_path))
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(lambda _: enricher(precipitation_df.copy()), range(16)))
+
+    assert computed == [5]
+    assert all(df["h3_index"].notna().all() for df in results)

@@ -58,3 +58,38 @@ def test_project_config_is_valid():
     config = load_configuration(project_config)
     assert config["variables"] == ["total_precipitation", "2m_temperature"]
     assert {q["variable"] for q in config["queries"]} == set(config["variables"])
+
+
+def test_defaults_of_the_optional_keys(tmp_path):
+    config = load_configuration(write_config(tmp_path, BASE_CONFIG))
+
+    assert config["source"] == "netcdf"
+    assert config["sink"] == "parquet"
+    assert config["workers"] == 1
+    assert config["storage_options"] == {"token": "anon"}
+    assert config["iceberg_warehouse_path"] == os.path.join(config["output_path"], "iceberg")
+
+
+def test_iceberg_warehouse_path_is_resolved_against_config_dir(tmp_path):
+    config = load_configuration(write_config(tmp_path, {**BASE_CONFIG, "iceberg_warehouse_path": "../lake"}))
+    assert config["iceberg_warehouse_path"] == os.path.normpath(str(tmp_path / "lake"))
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "message"),
+    [("source", "grib", "source 'grib'"), ("sink", "delta", "sink 'delta'"), ("workers", 0, "workers")],
+)
+def test_invalid_choices_raise(tmp_path, key, value, message):
+    with pytest.raises(ValueError, match=message):
+        load_configuration(write_config(tmp_path, {**BASE_CONFIG, key: value}))
+
+
+def test_defaults_are_not_shared_between_configurations(tmp_path):
+    first = load_configuration(write_config(tmp_path, BASE_CONFIG))
+    first["queries"].append({"name": "x"})
+    first["storage_options"]["token"] = "secret"
+
+    (tmp_path / "config").rename(tmp_path / "old")
+    second = load_configuration(write_config(tmp_path, BASE_CONFIG))
+    assert second["queries"] == []
+    assert second["storage_options"] == {"token": "anon"}

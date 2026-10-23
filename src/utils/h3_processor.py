@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 
 import h3
 import pandas as pd
@@ -82,3 +83,29 @@ def enrich_with_h3(df, resolution, lookup_dir, h3_lookup=None):
     h3_lookup = precompute_h3_index_lookup(df, resolution)
     write_parquet_atomic(h3_lookup, path)
     return map_h3_indices_to_dataframe(df, h3_lookup), h3_lookup
+
+
+class H3Enricher:
+    """
+    Thread-safe H3 enrichment, sharing one lookup table between the workers of a run.
+
+    The lookup is read, mapped and validated without locking; loading or recomputing
+    it is serialized, so concurrent workers never compute it twice.
+    """
+
+    def __init__(self, resolution: int, lookup_dir: str):
+        self.resolution = resolution
+        self.lookup_dir = lookup_dir
+        self._lookup: pd.DataFrame | None = None
+        self._lock = threading.Lock()
+
+    def __call__(self, df: pd.DataFrame) -> pd.DataFrame:
+        lookup = self._lookup
+        if lookup is not None:
+            df_with_h3 = map_h3_indices_to_dataframe(df, lookup)
+            if not df_with_h3["h3_index"].isna().any():
+                return df_with_h3
+
+        with self._lock:
+            df_with_h3, self._lookup = enrich_with_h3(df, self.resolution, self.lookup_dir, self._lookup)
+        return df_with_h3

@@ -2,9 +2,11 @@ import logging
 import time
 from datetime import datetime, timedelta
 
-import gcsfs
 import pandas as pd
 import xarray as xr
+
+from utils.sources import Source
+from utils.variables import VariableSpec
 
 logger = logging.getLogger(__name__)
 
@@ -35,29 +37,36 @@ def generate_date_range(start_date, end_date):
     return dates
 
 
-def extract_variable_data(bucket_path, year, month, day, variable, file_name, max_retries=3, retry_delay=2, fs=None):
+def extract_variable_data(
+    source: Source,
+    year: int,
+    month: int,
+    day: int,
+    variable: VariableSpec,
+    max_retries: int = 3,
+    retry_delay: float = 2,
+) -> pd.DataFrame:
     """
-    Extract the data of an ERA5 variable from the Google Cloud Storage (GCS) bucket for a specific date.
+    Extract the hourly data of an ERA5 variable for a specific date.
 
-    Transient errors are retried with exponential backoff; missing files are not.
+    A derived variable is computed from its source fields. Transient errors are
+    retried with exponential backoff; missing data is not.
 
     Args:
-        bucket_path (str): GCS bucket path.
+        source (Source): Where the ERA5 fields are read from, see utils.sources.
         year (int): Year of the data.
         month (int): Month of the data.
         day (int): Day of the data.
         variable (VariableSpec): Variable to extract, see utils.variables.
-        file_name (str): File name pattern to match.
         max_retries (int): Number of attempts before giving up.
         retry_delay (float): Base delay in seconds between attempts.
-        fs (fsspec.AbstractFileSystem): Filesystem to read from (defaults to GCS).
 
     Returns:
-        pd.DataFrame: A DataFrame containing the extracted and cleaned data.
+        pd.DataFrame: Columns time, latitude, longitude and the variable, cleaned.
     """
     for attempt in range(1, max_retries + 1):
         try:
-            return _read_daily_files(bucket_path, year, month, day, variable, file_name, fs)
+            return _read_variable_day(source, year, month, day, variable)
         except (FileNotFoundError, ValueError):
             raise
         except Exception as exc:
@@ -66,36 +75,17 @@ def extract_variable_data(bucket_path, year, month, day, variable, file_name, ma
             wait = retry_delay * 2 ** (attempt - 1)
             logger.warning(
                 "Attempt %d/%d for %s %d-%02d-%02d failed (%s), retrying in %ss",
-                attempt,
-                max_retries,
-                variable.name,
-                year,
-                month,
-                day,
-                exc,
-                wait,
-            )
+                attempt, max_retries, variable.name, year, month, day, exc, wait,
+            )  # fmt: skip
             time.sleep(wait)
+    raise RuntimeError("max_retries must be at least 1")
 
 
-def _read_daily_files(bucket_path, year, month, day, variable, file_name, fs=None):
+def _read_variable_day(source: Source, year: int, month: int, day: int, variable: VariableSpec) -> pd.DataFrame:
     logger.info("Extracting %s data for %d-%02d-%02d", variable.name, year, month, day)
-    fs = fs or gcsfs.GCSFileSystem()
-    path = f"{bucket_path}{year}/{month:02d}/{day:02d}/{variable.name}/{file_name}"
-    files = fs.glob(path)
+    inputs = {field.short_name: source.read(field, year, month, day) for field in variable.fields}
+    data = variable.derive(xr.Dataset(inputs)) if variable.derive else inputs[variable.short_name]
 
-    if not files:
-        raise FileNotFoundError(f"No {variable.name} files found for {year}-{month:02d}-{day:02d}.")
-
-    frames = []
-    for file in files:
-        with fs.open(file, "rb") as f, xr.open_dataset(f, engine="scipy") as dataset:
-            if variable.short_name not in dataset.variables:
-                continue
-            df = dataset[[variable.short_name]].to_dataframe().reset_index()
-            frames.append(variable.clean(df, variable.short_name))
-
-    if not frames:
-        raise ValueError(f"No {variable.name} data found for {year}-{month:02d}-{day:02d}.")
-
-    return pd.concat(frames, ignore_index=True)
+    # ERA5 values are packed on 16 bits: float32 keeps their precision with half the memory of float64
+    df = data.astype("float32").rename(variable.short_name).to_dataframe().reset_index()
+    return variable.clean(df, variable.short_name)
