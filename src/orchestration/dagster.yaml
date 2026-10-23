@@ -1,0 +1,9 @@
+# Dagster instance settings: copy this file into $DAGSTER_HOME
+concurrency:
+  pools:
+    # Each ingestion step holds a variable-day in memory (~1.5 GB)
+    default_limit: 4
+run_queue:
+  max_concurrent_runs: 4
+telemetry:
+  enabled: false

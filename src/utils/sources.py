@@ -23,6 +23,10 @@ class Source(Protocol):
         """Return the 24 hourly grids of a field for a day, named after field.short_name."""
         ...
 
+    def available(self, field: SourceField, year: int, month: int, day: int) -> bool:
+        """Return True if the field has been published for the day."""
+        ...
+
 
 class NetCDFSource:
     """
@@ -38,10 +42,15 @@ class NetCDFSource:
         # The ERA5 bucket is public: anonymous access skips the slow lookup of Google credentials
         self.fs = fs or gcsfs.GCSFileSystem(**(storage_options or {}))
 
-    def read(self, field: SourceField, year: int, month: int, day: int) -> xr.DataArray:
+    def path(self, field: SourceField, year: int, month: int, day: int) -> str:
         file_name = self.file_name.format(year=year, month=month, day=day)
-        path = f"{self.bucket_path}{year}/{month:02d}/{day:02d}/{field.name}/{file_name}"
-        files = self.fs.glob(path)
+        return f"{self.bucket_path}{year}/{month:02d}/{day:02d}/{field.name}/{file_name}"
+
+    def available(self, field: SourceField, year: int, month: int, day: int) -> bool:
+        return bool(self.fs.glob(self.path(field, year, month, day)))
+
+    def read(self, field: SourceField, year: int, month: int, day: int) -> xr.DataArray:
+        files = self.fs.glob(self.path(field, year, month, day))
         if not files:
             raise FileNotFoundError(f"No {field.name} files found for {year}-{month:02d}-{day:02d}.")
 
@@ -82,6 +91,12 @@ class ZarrSource:
                 options = self.storage_options if "://" in self.store else None
                 self._dataset = xr.open_zarr(self.store, chunks=None, storage_options=options)
             return self._dataset
+
+    def available(self, field: SourceField, year: int, month: int, day: int) -> bool:
+        last_day = self.dataset.attrs.get("valid_time_stop")
+        return field.name in self.dataset.data_vars and (
+            not last_day or pd.Timestamp(year=year, month=month, day=day) <= pd.Timestamp(last_day)
+        )
 
     def read(self, field: SourceField, year: int, month: int, day: int) -> xr.DataArray:
         dataset = self.dataset

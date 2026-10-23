@@ -46,8 +46,10 @@ h3_lookup_path: "../output/h3_lookup"
 h3_resolution: 5
 
 # Variables to process, among the supported ones (see src/utils/variables.py):
-#   total_precipitation: column 'tp', meters, aggregates: sum (reported in mm)
-#   2m_temperature:      column 't2m', Kelvin, aggregates: mean, min, max (reported in °C)
+#   total_precipitation:  column 'tp', meters, aggregates: sum (reported in mm)
+#   2m_temperature:       column 't2m', Kelvin, aggregates: mean, min, max (reported in °C)
+#   10m_wind_speed:       column 'ws10', m/s, derived from the u/v wind components
+#   2m_relative_humidity: column 'rh2m', %, derived from the temperature and the dewpoint
 variables:
   - total_precipitation
   - 2m_temperature
@@ -64,6 +66,9 @@ workers: 4
 
 # Data contract: share of missing values above which a variable-day is rejected
 max_null_fraction: 0.01
+
+# First day of the daily partitions of the Dagster assets (src/orchestration)
+partitions_start_date: "2022-01-01"
 
 # Sample Queries
 # Each query targets one variable and supports any combination of the following filters:

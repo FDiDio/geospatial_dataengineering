@@ -37,6 +37,8 @@ DEFAULTS = {
     "iceberg_namespace": "era5",
     "iceberg_catalog": None,
     "max_null_fraction": DEFAULT_MAX_NULL_FRACTION,
+    # First day of the Dagster partitions
+    "partitions_start_date": "2022-01-01",
 }
 
 

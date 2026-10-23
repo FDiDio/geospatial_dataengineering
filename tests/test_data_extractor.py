@@ -159,3 +159,16 @@ def test_zarr_source_stops_at_the_last_published_day(zarr_store):
 def test_zarr_source_unknown_field_raises(zarr_store):
     with pytest.raises(ValueError, match="10m_u_component_of_wind"):
         extract_variable_data(ZarrSource(zarr_store), 2022, 4, 30, get_variable("10m_wind_speed"))
+
+
+def test_netcdf_availability(memory_fs, netcdf_source):
+    write_netcdf(memory_fs, make_precipitation_df(["2022-04-30"]), f"{BUCKET}2022/04/30/total_precipitation/surface.nc")
+    assert netcdf_source.available(PRECIPITATION.fields[0], 2022, 4, 30)
+    assert not netcdf_source.available(PRECIPITATION.fields[0], 2022, 5, 1)
+
+
+def test_zarr_availability_follows_the_last_published_day(zarr_store):
+    source = ZarrSource(zarr_store)
+    assert source.available(TEMPERATURE.fields[0], 2022, 4, 30)
+    assert not source.available(TEMPERATURE.fields[0], 2022, 5, 1)
+    assert not source.available(get_variable("10m_wind_speed").fields[0], 2022, 4, 30)

@@ -62,7 +62,10 @@ markers = [
     "network: tests reading the public ERA5 bucket, skipped unless selected with -m network",
 ]
 addopts = "-m 'not network'"
-filterwarnings = ["ignore:Delete operation did not match any records:UserWarning"]
+filterwarnings = [
+    "ignore:Delete operation did not match any records:UserWarning",
+    "ignore:sqlglotrs is deprecated:DeprecationWarning",  # dependency of dagster-dbt
+]
 
 [tool.ruff]
 line-length = 120
