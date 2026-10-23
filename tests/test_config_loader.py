@@ -1,6 +1,8 @@
 import os
+
 import pytest
 import yaml
+
 from utils.config_loader import load_configuration
 
 BASE_CONFIG = {

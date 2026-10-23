@@ -1,6 +1,7 @@
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Tuple
+
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -14,7 +15,7 @@ TEMPERATURE_RANGE_K = (150.0, 350.0)
 KELVIN_OFFSET = 273.15
 
 
-def clean_precipitation_values(df, column='tp'):
+def clean_precipitation_values(df, column="tp"):
     """
     Set negligible total precipitation values to zero.
 
@@ -29,7 +30,7 @@ def clean_precipitation_values(df, column='tp'):
     return df
 
 
-def clean_temperature_values(df, column='t2m'):
+def clean_temperature_values(df, column="t2m"):
     """
     Replace physically implausible 2m temperature values with NaN.
 
@@ -62,27 +63,37 @@ class VariableSpec:
         clean: Cleaning applied to the extracted DataFrame.
         to_report_unit: Conversion from source_unit to report_unit.
     """
+
     name: str
     short_name: str
     source_unit: str
     report_unit: str
-    aggregations: Tuple[str, ...]
+    aggregations: tuple[str, ...]
     clean: Callable[[pd.DataFrame, str], pd.DataFrame]
     to_report_unit: Callable[[float], float]
 
 
 VARIABLES = {
-    spec.name: spec for spec in (
+    spec.name: spec
+    for spec in (
         # Hourly accumulation: summing over time gives the total precipitation
         VariableSpec(
-            name="total_precipitation", short_name="tp", source_unit="m", report_unit="mm",
-            aggregations=("sum",), clean=clean_precipitation_values,
+            name="total_precipitation",
+            short_name="tp",
+            source_unit="m",
+            report_unit="mm",
+            aggregations=("sum",),
+            clean=clean_precipitation_values,
             to_report_unit=lambda value: value * 1000,
         ),
         # Instantaneous value: a sum over time is meaningless, statistics are reported instead
         VariableSpec(
-            name="2m_temperature", short_name="t2m", source_unit="K", report_unit="°C",
-            aggregations=("mean", "min", "max"), clean=clean_temperature_values,
+            name="2m_temperature",
+            short_name="t2m",
+            source_unit="K",
+            report_unit="°C",
+            aggregations=("mean", "min", "max"),
+            clean=clean_temperature_values,
             to_report_unit=lambda value: value - KELVIN_OFFSET,
         ),
     )

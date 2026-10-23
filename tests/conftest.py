@@ -5,7 +5,7 @@ import pytest
 
 def make_era5_df(days, column="tp", value=0.001, latitudes=(47.25, 47.5), longitudes=(8.5, 8.75)):
     """Build an hourly DataFrame shaped like the ERA5 extraction output of a variable."""
-    times = pd.date_range(days[0], pd.Timestamp(days[-1]) + pd.Timedelta(hours=23), freq="H")
+    times = pd.date_range(days[0], pd.Timestamp(days[-1]) + pd.Timedelta(hours=23), freq="h")
     index = pd.MultiIndex.from_product(
         [times, np.array(latitudes, dtype="float32"), np.array(longitudes, dtype="float32")],
         names=["time", "latitude", "longitude"],

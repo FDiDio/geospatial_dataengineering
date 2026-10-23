@@ -1,9 +1,11 @@
 import os
+
 import h3
 import pytest
 from conftest import make_precipitation_df, make_temperature_df
+
 from utils.data_writer import daily_output_path, save_data_to_parquet
-from utils.h3_processor import precompute_h3_index_lookup, map_h3_indices_to_dataframe
+from utils.h3_processor import map_h3_indices_to_dataframe, precompute_h3_index_lookup
 from utils.query_runner import build_filter_expression, run_queries_on_data
 
 DAYS = ["2022-03-31", "2022-04-01", "2022-04-30", "2022-05-01"]
@@ -48,9 +50,14 @@ def test_end_day_is_fully_included(output_dir, tmp_path):
 
 
 def test_precipitation_point_sum_in_mm(output_dir, tmp_path):
-    query = {"name": "zurich", "variable": "total_precipitation",
-             "point": {"latitude": 47.25, "longitude": 8.5, "tolerance": 0.01},
-             "start": "2022-04-01", "end": "2022-04-30", "aggregate": "sum"}
+    query = {
+        "name": "zurich",
+        "variable": "total_precipitation",
+        "point": {"latitude": 47.25, "longitude": 8.5, "tolerance": 0.01},
+        "start": "2022-04-01",
+        "end": "2022-04-30",
+        "aggregate": "sum",
+    }
     result = run(output_dir, tmp_path, query)["zurich"]
     # 2 days x 24 hours x 1 grid point x 0.001 m
     assert result == {"sum": pytest.approx(48.0, rel=1e-4)}
@@ -58,9 +65,14 @@ def test_precipitation_point_sum_in_mm(output_dir, tmp_path):
 
 
 def test_temperature_statistics_in_celsius(output_dir, tmp_path):
-    query = {"name": "zurich_t", "variable": "2m_temperature",
-             "point": {"latitude": 47.25, "longitude": 8.5},
-             "start": "2022-04-01", "end": "2022-04-30", "aggregate": ["mean", "min", "max"]}
+    query = {
+        "name": "zurich_t",
+        "variable": "2m_temperature",
+        "point": {"latitude": 47.25, "longitude": 8.5},
+        "start": "2022-04-01",
+        "end": "2022-04-30",
+        "aggregate": ["mean", "min", "max"],
+    }
     result = run(output_dir, tmp_path, query)["zurich_t"]
     # 10 °C base, -5 °C at midnight, +6.5 °C at 23:00
     assert result["min"] == pytest.approx(5.0, abs=1e-3)
@@ -78,17 +90,23 @@ def test_temperature_rows_keep_kelvin(output_dir, tmp_path):
 
 def test_h3_and_bbox_filters(output_dir, tmp_path):
     cell = h3.latlng_to_cell(47.5, 8.75, 5)
-    results = run(output_dir, tmp_path,
-                  {"name": "cell", "variable": "total_precipitation", "h3_index": cell},
-                  {"name": "box", "variable": "2m_temperature",
-                   "bbox": {"lat_min": 47.4, "lat_max": 47.6, "lon_min": 8.6, "lon_max": 8.8}})
+    results = run(
+        output_dir,
+        tmp_path,
+        {"name": "cell", "variable": "total_precipitation", "h3_index": cell},
+        {
+            "name": "box",
+            "variable": "2m_temperature",
+            "bbox": {"lat_min": 47.4, "lat_max": 47.6, "lon_min": 8.6, "lon_max": 8.8},
+        },
+    )
 
     assert not results["cell"].empty and (results["cell"]["h3_index"] == cell).all()
-    assert set(zip(results["box"]["latitude"], results["box"]["longitude"])) == {(47.5, 8.75)}
+    assert set(zip(results["box"]["latitude"], results["box"]["longitude"], strict=True)) == {(47.5, 8.75)}
 
 
 def test_sum_of_temperature_is_rejected(output_dir, tmp_path):
-    with pytest.raises(ValueError, match="sum.*2m_temperature"):
+    with pytest.raises(ValueError, match=r"sum.*2m_temperature"):
         run(output_dir, tmp_path, {"name": "x", "variable": "2m_temperature", "aggregate": "sum"})
 
 
@@ -100,9 +118,12 @@ def test_query_without_variable_is_rejected(output_dir, tmp_path):
 def test_query_on_unprocessed_variable_is_skipped(tmp_path):
     output = tmp_path / "output"
     write_dataset(output, "total_precipitation", make_precipitation_df)
-    results = run(str(output), tmp_path,
-                  {"name": "t", "variable": "2m_temperature", "aggregate": "mean"},
-                  {"name": "p", "variable": "total_precipitation", "aggregate": "sum"})
+    results = run(
+        str(output),
+        tmp_path,
+        {"name": "t", "variable": "2m_temperature", "aggregate": "mean"},
+        {"name": "p", "variable": "total_precipitation", "aggregate": "sum"},
+    )
     assert set(results) == {"p"}
 
 

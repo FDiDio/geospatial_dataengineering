@@ -2,9 +2,11 @@ import logging
 import operator
 import os
 from functools import reduce
+
+import pandas as pd
 import pyarrow as pa
 import pyarrow.dataset as ds
-import pandas as pd
+
 from utils.data_writer import dataset_path, save_query_results_to_parquet
 from utils.variables import get_variable
 
@@ -43,8 +45,10 @@ def build_filter_expression(query):
     if "bbox" in query:
         bbox = query["bbox"]
         conditions += [
-            ds.field("latitude") >= bbox["lat_min"], ds.field("latitude") <= bbox["lat_max"],
-            ds.field("longitude") >= bbox["lon_min"], ds.field("longitude") <= bbox["lon_max"],
+            ds.field("latitude") >= bbox["lat_min"],
+            ds.field("latitude") <= bbox["lat_max"],
+            ds.field("longitude") >= bbox["lon_min"],
+            ds.field("longitude") <= bbox["lon_max"],
         ]
     if "point" in query:
         # Grid coordinates are floats: match the nearest grid point within a tolerance
@@ -75,8 +79,10 @@ def query_aggregations(query, variable):
     aggregations = [aggregate] if isinstance(aggregate, str) else list(aggregate)
     unsupported = [agg for agg in aggregations if agg not in variable.aggregations]
     if unsupported:
-        raise ValueError(f"Unsupported aggregate {', '.join(unsupported)} in query '{query['name']}' "
-                         f"for {variable.name}, supported: {', '.join(variable.aggregations)}")
+        raise ValueError(
+            f"Unsupported aggregate {', '.join(unsupported)} in query '{query['name']}' "
+            f"for {variable.name}, supported: {', '.join(variable.aggregations)}"
+        )
     return aggregations
 
 
@@ -139,8 +145,9 @@ def run_queries_on_data(output_path, output_query_dir, queries):
 
         if variable.name not in datasets:
             directory = dataset_path(output_path, variable.name)
-            datasets[variable.name] = (ds.dataset(directory, format="parquet", partitioning=PARTITIONING)
-                                       if os.path.isdir(directory) else None)
+            datasets[variable.name] = (
+                ds.dataset(directory, format="parquet", partitioning=PARTITIONING) if os.path.isdir(directory) else None
+            )
         if datasets[variable.name] is None:
             logger.warning("Skipping query '%s': no processed %s data", query["name"], variable.name)
             continue

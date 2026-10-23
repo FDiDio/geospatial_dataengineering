@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 from conftest import make_precipitation_df, make_temperature_df
+
 from utils.variables import clean_precipitation_values, clean_temperature_values, get_variable
 
 

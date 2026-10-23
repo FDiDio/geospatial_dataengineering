@@ -1,7 +1,9 @@
 import os
+
 import yaml
-import main_script
 from conftest import make_precipitation_df, make_temperature_df
+
+import main_script
 from utils.data_writer import daily_output_path
 
 MAKERS = {"total_precipitation": make_precipitation_df, "2m_temperature": make_temperature_df}
@@ -9,10 +11,14 @@ MAKERS = {"total_precipitation": make_precipitation_df, "2m_temperature": make_t
 
 def write_config(tmp_path):
     config = {
-        "bucket_path": "bucket/", "output_path": "output", "query_output_path": "queries",
-        "h3_lookup_path": "lookup", "h3_resolution": 5,
+        "bucket_path": "bucket/",
+        "output_path": "output",
+        "query_output_path": "queries",
+        "h3_lookup_path": "lookup",
+        "h3_resolution": 5,
         "variables": ["total_precipitation", "2m_temperature"],
-        "file_name": "surface.nc", "max_retries": 1,
+        "file_name": "surface.nc",
+        "max_retries": 1,
         "queries": [
             {"name": "all_april", "variable": "total_precipitation", "start": "2022-04-01", "end": "2022-04-30"},
             {"name": "april_t", "variable": "2m_temperature", "start": "2022-04-01", "end": "2022-04-30"},

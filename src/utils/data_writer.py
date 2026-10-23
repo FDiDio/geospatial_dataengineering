@@ -1,5 +1,6 @@
 import logging
 import os
+
 import pyarrow as pa
 import pyarrow.parquet as pq
 
@@ -43,8 +44,12 @@ def daily_output_path(output_path, variable_name, year, month, day):
     Returns:
         str: Path like <output_path>/total_precipitation/year=2022/month=01/2022-01-01_total_precipitation.parquet
     """
-    return os.path.join(dataset_path(output_path, variable_name), f"year={year}", f"month={month:02d}",
-                        f"{year}-{month:02d}-{day:02d}_{variable_name}.parquet")
+    return os.path.join(
+        dataset_path(output_path, variable_name),
+        f"year={year}",
+        f"month={month:02d}",
+        f"{year}-{month:02d}-{day:02d}_{variable_name}.parquet",
+    )
 
 
 def save_data_to_parquet(df, output_path, variable_name, year, month, day):

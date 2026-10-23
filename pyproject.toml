@@ -1,0 +1,84 @@
+[project]
+name = "era5-geospatial-pipeline"
+version = "0.2.0"
+description = "ERA5 reanalysis lakehouse: parallel ingestion, H3 indexing, data contracts, Iceberg, dbt + DuckDB marts and Dagster orchestration."
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "dask>=2025.1",
+    "gcsfs>=2025.1",
+    "h3>=4.1",
+    "numpy>=2.2",
+    "pandas>=3.0",
+    "pandera>=0.26",
+    "pyarrow>=20",
+    "pyiceberg[pyarrow,sql-sqlite]>=0.10",
+    "pyyaml>=6.0",
+    "scipy>=1.15",
+    "xarray>=2025.1",
+    "zarr>=3.0",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.15",
+    "pandas-stubs>=2.2",
+    "pre-commit>=4.0",
+    "pytest>=8.3",
+    "ruff>=0.11",
+    "types-pyyaml>=6.0",
+]
+# dbt + DuckDB transformation layer (transform/)
+transform = [
+    "dbt-core>=1.10",
+    "dbt-duckdb>=1.9",
+    "duckdb>=1.4,<2",
+]
+# Dagster orchestration (src/orchestration/)
+orchestration = [
+    "dagster>=1.11",
+    "dagster-dbt>=0.27",
+    "dagster-webserver>=1.11",
+    { include-group = "transform" },
+]
+# Streamlit H3 map (src/dashboard/)
+dashboard = [
+    "duckdb>=1.4,<2",
+    "pydeck>=0.9",
+    "streamlit>=1.45",
+]
+
+[tool.uv]
+# The pipeline runs from src/ (see pythonpath below), it is not installed as a package
+package = false
+default-groups = ["dev", "transform", "orchestration", "dashboard"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "tests"]
+testpaths = ["tests"]
+markers = [
+    "integration: end-to-end tests running dbt or Dagster on synthetic data (slower)",
+    "network: tests reading the public ERA5 bucket, skipped unless selected with -m network",
+]
+addopts = "-m 'not network'"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["transform/target", "transform/dbt_packages"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "NPY", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003"]  # the unit symbol ° is intentional
+
+[tool.ruff.lint.isort]
+known-first-party = ["utils", "main_script", "orchestration", "dashboard"]
+
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "src"
+explicit_package_bases = true
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+files = ["src"]

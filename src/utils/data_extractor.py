@@ -1,9 +1,10 @@
 import logging
 import time
+from datetime import datetime, timedelta
+
+import gcsfs
 import pandas as pd
 import xarray as xr
-import gcsfs
-from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +35,7 @@ def generate_date_range(start_date, end_date):
     return dates
 
 
-def extract_variable_data(bucket_path, year, month, day, variable, file_name,
-                          max_retries=3, retry_delay=2, fs=None):
+def extract_variable_data(bucket_path, year, month, day, variable, file_name, max_retries=3, retry_delay=2, fs=None):
     """
     Extract the data of an ERA5 variable from the Google Cloud Storage (GCS) bucket for a specific date.
 
@@ -64,8 +64,17 @@ def extract_variable_data(bucket_path, year, month, day, variable, file_name,
             if attempt == max_retries:
                 raise
             wait = retry_delay * 2 ** (attempt - 1)
-            logger.warning("Attempt %d/%d for %s %d-%02d-%02d failed (%s), retrying in %ss",
-                           attempt, max_retries, variable.name, year, month, day, exc, wait)
+            logger.warning(
+                "Attempt %d/%d for %s %d-%02d-%02d failed (%s), retrying in %ss",
+                attempt,
+                max_retries,
+                variable.name,
+                year,
+                month,
+                day,
+                exc,
+                wait,
+            )
             time.sleep(wait)
 
 
@@ -80,7 +89,7 @@ def _read_daily_files(bucket_path, year, month, day, variable, file_name, fs=Non
 
     frames = []
     for file in files:
-        with fs.open(file, 'rb') as f, xr.open_dataset(f, engine='scipy') as dataset:
+        with fs.open(file, "rb") as f, xr.open_dataset(f, engine="scipy") as dataset:
             if variable.short_name not in dataset.variables:
                 continue
             df = dataset[[variable.short_name]].to_dataframe().reset_index()

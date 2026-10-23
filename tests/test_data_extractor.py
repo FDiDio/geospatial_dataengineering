@@ -1,7 +1,7 @@
 import fsspec
-import numpy as np
 import pytest
 from conftest import make_precipitation_df, make_temperature_df
+
 from utils.data_extractor import extract_variable_data, generate_date_range
 from utils.variables import get_variable
 
@@ -71,8 +71,9 @@ def test_extract_missing_day_is_not_retried(memory_fs, monkeypatch):
 
     monkeypatch.setattr(memory_fs, "glob", counting_glob)
     with pytest.raises(FileNotFoundError):
-        extract_variable_data(BUCKET, 2022, 1, 1, PRECIPITATION, "surface.nc",
-                              max_retries=3, retry_delay=0, fs=memory_fs)
+        extract_variable_data(
+            BUCKET, 2022, 1, 1, PRECIPITATION, "surface.nc", max_retries=3, retry_delay=0, fs=memory_fs
+        )
     assert len(calls) == 1
 
 
@@ -87,8 +88,9 @@ def test_extract_retries_transient_errors(memory_fs, monkeypatch):
         return original_glob(path)
 
     monkeypatch.setattr(memory_fs, "glob", flaky_glob)
-    df = extract_variable_data(BUCKET, 2022, 4, 30, PRECIPITATION, "surface.nc",
-                               max_retries=2, retry_delay=0, fs=memory_fs)
+    df = extract_variable_data(
+        BUCKET, 2022, 4, 30, PRECIPITATION, "surface.nc", max_retries=2, retry_delay=0, fs=memory_fs
+    )
     assert not df.empty
 
 
@@ -98,5 +100,6 @@ def test_extract_gives_up_after_max_retries(memory_fs, monkeypatch):
 
     monkeypatch.setattr(memory_fs, "glob", broken_glob)
     with pytest.raises(OSError):
-        extract_variable_data(BUCKET, 2022, 4, 30, PRECIPITATION, "surface.nc",
-                              max_retries=2, retry_delay=0, fs=memory_fs)
+        extract_variable_data(
+            BUCKET, 2022, 4, 30, PRECIPITATION, "surface.nc", max_retries=2, retry_delay=0, fs=memory_fs
+        )

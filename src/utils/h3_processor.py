@@ -1,7 +1,9 @@
 import logging
 import os
+
 import h3
 import pandas as pd
+
 from utils.data_writer import write_parquet_atomic
 
 logger = logging.getLogger(__name__)
@@ -20,10 +22,10 @@ def precompute_h3_index_lookup(df, resolution=5):
     """
     logger.info("Precomputing H3 lookup table at resolution %d", resolution)
 
-    unique_coords = df[['latitude', 'longitude']].drop_duplicates().reset_index(drop=True)
-    unique_coords['h3_index'] = [
+    unique_coords = df[["latitude", "longitude"]].drop_duplicates().reset_index(drop=True)
+    unique_coords["h3_index"] = [
         h3.latlng_to_cell(lat, lon, resolution)
-        for lat, lon in zip(unique_coords['latitude'].tolist(), unique_coords['longitude'].tolist())
+        for lat, lon in zip(unique_coords["latitude"].tolist(), unique_coords["longitude"].tolist(), strict=True)
     ]
     return unique_coords
 
@@ -40,7 +42,7 @@ def map_h3_indices_to_dataframe(df, h3_lookup):
         pd.DataFrame: DataFrame with H3 indices mapped to it.
     """
     logger.info("Mapping H3 indices to the DataFrame")
-    df_with_h3 = df.merge(h3_lookup, on=['latitude', 'longitude'], how='left')
+    df_with_h3 = df.merge(h3_lookup, on=["latitude", "longitude"], how="left")
     return df_with_h3
 
 
@@ -73,7 +75,7 @@ def enrich_with_h3(df, resolution, lookup_dir, h3_lookup=None):
 
     if h3_lookup is not None:
         df_with_h3 = map_h3_indices_to_dataframe(df, h3_lookup)
-        if not df_with_h3['h3_index'].isna().any():
+        if not df_with_h3["h3_index"].isna().any():
             return df_with_h3, h3_lookup
         logger.info("H3 lookup table does not cover the current grid, recomputing it")
 

@@ -1,6 +1,8 @@
 import os
+
 import h3
 import pandas as pd
+
 from utils import h3_processor
 from utils.h3_processor import enrich_with_h3, lookup_file_path, precompute_h3_index_lookup
 

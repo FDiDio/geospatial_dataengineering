@@ -1,6 +1,8 @@
 import logging
 import os
+
 import yaml
+
 from utils.data_writer import dataset_path
 from utils.variables import get_variable
 
@@ -9,8 +11,15 @@ logger = logging.getLogger(__name__)
 # Configuration keys holding local filesystem paths
 PATH_KEYS = ("output_path", "query_output_path", "h3_lookup_path")
 
-REQUIRED_KEYS = ("bucket_path", "output_path", "query_output_path", "h3_lookup_path",
-                 "h3_resolution", "variables", "file_name")
+REQUIRED_KEYS = (
+    "bucket_path",
+    "output_path",
+    "query_output_path",
+    "h3_lookup_path",
+    "h3_resolution",
+    "variables",
+    "file_name",
+)
 
 
 def load_configuration(config_path):
@@ -27,7 +36,7 @@ def load_configuration(config_path):
         dict: Loaded configuration dictionary.
     """
     logger.info("Loading configuration from %s", config_path)
-    with open(config_path, 'r') as file:
+    with open(config_path) as file:
         config = yaml.safe_load(file) or {}
 
     missing = [key for key in REQUIRED_KEYS if key not in config]
