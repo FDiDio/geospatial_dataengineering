@@ -21,10 +21,10 @@ DEFAULT_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", 
 def parse_arguments(argv=None):
     parser = argparse.ArgumentParser(description="Process ERA5 data from GCS.")
     parser.add_argument(
-        "--start_date", type=str, default="20220101", help="Start date in YYYYMMDD format (default: 20220101)"
+        "--start_date", type=str, default="20220101", help="Start date, YYYYMMDD or today-N (default: 20220101)"
     )
     parser.add_argument(
-        "--end_date", type=str, default="20221231", help="End date in YYYYMMDD format (default: 20221231)"
+        "--end_date", type=str, default="20221231", help="End date, YYYYMMDD or today-N (default: 20221231)"
     )
     parser.add_argument(
         "--config",

@@ -39,21 +39,23 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def run(command, env):
+def run(command, env, log_path):
     """Run the command, sampling the memory of its process every 0.2 s; return (seconds, peak GB, exit code)."""
     start = time.perf_counter()
-    process = subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-    monitor = psutil.Process(process.pid)
-    peak = 0
-    while process.poll() is None:
-        try:
-            peak = max(peak, sum(p.memory_info().rss for p in [monitor, *monitor.children(recursive=True)]))
-        except psutil.NoSuchProcess:
-            break
-        time.sleep(0.2)
-    stderr = process.stderr.read() if process.stderr else ""
+    # The logs go to a file: a pipe left unread would block the process once its buffer is full
+    with open(log_path, "w") as log:
+        process = subprocess.Popen(command, env=env, stdout=log, stderr=subprocess.STDOUT)
+        monitor = psutil.Process(process.pid)
+        peak = 0
+        while process.poll() is None:
+            try:
+                peak = max(peak, sum(p.memory_info().rss for p in [monitor, *monitor.children(recursive=True)]))
+            except psutil.NoSuchProcess:
+                break
+            time.sleep(0.2)
     if process.returncode != 0:
-        print(stderr[-3000:], file=sys.stderr)
+        with open(log_path) as log:
+            print(log.read()[-3000:], file=sys.stderr)
     return time.perf_counter() - start, peak / 1e9, process.returncode
 
 
@@ -80,7 +82,7 @@ def main():
             *args.pipeline_args,
         ]  # fmt: skip
         env = {**os.environ, "PYTHONPATH": args.src}
-        seconds, peak_gb, exit_code = run(command, env)
+        seconds, peak_gb, exit_code = run(command, env, os.path.join(workdir, "pipeline.log"))
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 

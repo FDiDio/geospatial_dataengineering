@@ -36,3 +36,6 @@ logs/
 *.tfstate.*
 *.tfplan
 .terraform.lock.hcl.bak
+
+# dbt anonymous user id
+.user.yml

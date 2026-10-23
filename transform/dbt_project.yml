@@ -9,6 +9,9 @@ test-paths: ["tests"]
 target-path: target
 clean-targets: [target, logs]
 
+flags:
+  send_anonymous_usage_stats: false
+
 vars:
   # Days (re)built by the incremental models, e.g. --vars '{start_date: 2022-04-01, end_date: 2022-04-30}'.
   # Without them, the models process the days after the last one built, minus lookback_days.

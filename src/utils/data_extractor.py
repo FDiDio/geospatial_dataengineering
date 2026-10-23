@@ -1,6 +1,7 @@
 import logging
+import re
 import time
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 import xarray as xr
@@ -11,19 +12,32 @@ from utils.variables import VariableSpec
 logger = logging.getLogger(__name__)
 
 
+def parse_date(text):
+    """
+    Parse a date in the format YYYYMMDD, or relative to the current UTC day: "today", "today-6".
+
+    Relative dates let a scheduled run always target the latest days published by ERA5.
+    """
+    relative = re.fullmatch(r"today(?:-(\d+))?", text)
+    if relative:
+        today = datetime.now(UTC).replace(tzinfo=None, hour=0, minute=0, second=0, microsecond=0)
+        return today - timedelta(days=int(relative.group(1) or 0))
+    return datetime.strptime(text, "%Y%m%d")
+
+
 def generate_date_range(start_date, end_date):
     """
     Generate a list of dates between the specified start and end date, inclusive.
 
     Args:
-        start_date (str): Start date in the format YYYYMMDD.
-        end_date (str): End date in the format YYYYMMDD.
+        start_date (str): Start date in the format YYYYMMDD, or relative like "today-10".
+        end_date (str): End date in the format YYYYMMDD, or relative like "today-6".
 
     Returns:
         list: A list of tuples containing year, month, and day for each date in the range.
     """
-    start = datetime.strptime(start_date, "%Y%m%d")
-    end = datetime.strptime(end_date, "%Y%m%d")
+    start = parse_date(start_date)
+    end = parse_date(end_date)
     if start > end:
         raise ValueError(f"Start date {start_date} is after end date {end_date}.")
 

@@ -1,0 +1,4 @@
+project_id       = "my-gcp-project"
+lake_bucket_name = "my-gcp-project-era5-lake"
+# region         = "us-central1"
+# variables      = ["total_precipitation", "2m_temperature", "10m_wind_speed"]

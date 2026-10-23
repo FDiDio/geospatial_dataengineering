@@ -1,8 +1,11 @@
+from datetime import datetime
+
 import fsspec
 import numpy as np
 import pytest
 from conftest import FakeSource, make_precipitation_df, make_temperature_df, to_data_array
 
+from utils import data_extractor
 from utils.data_extractor import extract_variable_data, generate_date_range
 from utils.sources import NetCDFSource, ZarrSource
 from utils.variables import get_variable
@@ -32,6 +35,17 @@ def write_netcdf(fs, df, path):
 
 def test_generate_date_range_is_inclusive_and_crosses_months():
     assert generate_date_range("20220130", "20220202") == [(2022, 1, 30), (2022, 1, 31), (2022, 2, 1), (2022, 2, 2)]
+
+
+def test_relative_dates_count_back_from_the_current_utc_day(monkeypatch):
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 10, 23, 1, 30, tzinfo=tz)
+
+    monkeypatch.setattr(data_extractor, "datetime", FrozenDatetime)
+    assert generate_date_range("today-7", "today-6") == [(2026, 10, 16), (2026, 10, 17)]
+    assert generate_date_range("20261022", "today") == [(2026, 10, 22), (2026, 10, 23)]
 
 
 def test_generate_date_range_rejects_inverted_range():

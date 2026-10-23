@@ -10,3 +10,9 @@ output/
 Dockerfile
 docker-compose.yml
 .dockerignore
+transform/target/
+transform/logs/
+transform/.user.yml
+infra/
+benchmarks/results.jsonl
+.github/

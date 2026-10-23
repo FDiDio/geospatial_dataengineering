@@ -1,14 +1,44 @@
+x-platform: &platform
+  build:
+    context: .
+    target: platform
+  image: era5-platform
+  # On Linux, run as the host user so the files in ./output belong to it
+  user: "${UID:-1000}:${GID:-1000}"
+  volumes:
+    - ./output:/app/output
+    - dagster_home:/app/dagster_home/storage
+  environment:
+    DUCKDB_PATH: /app/output/warehouse.duckdb
+
 services:
-  # docker compose run --rm pipeline --start_date 20220430 --end_date 20220430
+  # docker compose run --rm pipeline --start_date 20220430 --end_date 20220430 --workers 4
   pipeline:
     build:
       context: .
       target: runtime
     image: era5-pipeline
-    # On Linux, run as the host user so the files in ./output belong to it
     user: "${UID:-1000}:${GID:-1000}"
     volumes:
       - ./output:/app/output
+
+  # docker compose up dagster-webserver dagster-daemon   ->  http://localhost:3000
+  dagster-webserver:
+    <<: *platform
+    ports:
+      - "3000:3000"
+
+  # Runs the sensors and the queued runs
+  dagster-daemon:
+    <<: *platform
+    command: ["dagster-daemon", "run", "-m", "orchestration.definitions", "-d", "src"]
+
+  # docker compose up dashboard   ->  http://localhost:8501
+  dashboard:
+    <<: *platform
+    ports:
+      - "8501:8501"
+    command: ["streamlit", "run", "src/dashboard/app.py", "--server.address", "0.0.0.0", "--server.port", "8501"]
 
   # docker compose run --rm tests
   tests:
@@ -16,3 +46,6 @@ services:
       context: .
       target: test
     image: era5-pipeline:test
+
+volumes:
+  dagster_home:
