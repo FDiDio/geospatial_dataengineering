@@ -1,0 +1,51 @@
+version: 2
+
+models:
+  - name: int_era5__daily_cell_temperature
+    description: >
+      Daily 2m temperature statistics per H3 cell. Incremental on the date: a run rebuilds the
+      days selected by the start_date/end_date vars, or the days after the last one built.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [date, h3_index]
+      - expression_is_true:
+          arguments:
+            expression: temperature_min_c <= temperature_mean_c and temperature_mean_c <= temperature_max_c
+      - expression_is_true:
+          arguments:
+            # every grid point of the cell has a value for each hour of the day
+            expression: hourly_values % 24 = 0
+    columns:
+      - name: date
+        data_tests: [not_null]
+      - name: h3_index
+        data_tests: [not_null]
+      - name: temperature_mean_c
+        description: Mean of the hourly values of the grid points of the cell, in °C.
+      - name: temperature_min_c
+        description: Lowest hourly value of the grid points of the cell, in °C.
+      - name: temperature_max_c
+        description: Highest hourly value of the grid points of the cell, in °C.
+      - name: hourly_values
+        description: Number of hourly values aggregated (24 per grid point).
+
+  - name: int_era5__daily_cell_precipitation
+    description: Daily precipitation per H3 cell, the areal mean of the daily totals of its grid points.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [date, h3_index]
+      - expression_is_true:
+          arguments:
+            # an hourly value cannot exceed the sum of the daily totals of the grid points of the cell
+            expression: precipitation_mm >= 0 and precipitation_max_hourly_mm <= precipitation_mm * hourly_values / 24 + 1e-6
+    columns:
+      - name: date
+        data_tests: [not_null]
+      - name: h3_index
+        data_tests: [not_null]
+      - name: precipitation_mm
+        description: Daily precipitation, in mm.
+      - name: precipitation_max_hourly_mm
+        description: Highest hourly precipitation of the grid points of the cell, in mm.

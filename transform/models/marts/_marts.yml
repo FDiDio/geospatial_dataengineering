@@ -1,0 +1,152 @@
+version: 2
+
+models:
+  - name: fct_daily_cell_weather
+    description: >
+      Daily weather of each H3 cell (resolution 5, ~250 km²): temperature statistics in °C and
+      precipitation in mm. Incremental on the date, like the intermediate models.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [date, h3_index]
+      - expression_is_true:
+          arguments:
+            expression: temperature_range_c >= 0
+    columns:
+      - name: date
+        description: UTC day.
+        data_tests: [not_null]
+      - name: h3_index
+        description: H3 cell.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_h3_cell')
+                field: h3_index
+      - name: temperature_mean_c
+        description: Mean 2m temperature, in °C.
+      - name: temperature_min_c
+        description: Minimum 2m temperature, in °C.
+      - name: temperature_max_c
+        description: Maximum 2m temperature, in °C.
+      - name: temperature_range_c
+        description: Diurnal temperature range, in °C.
+      - name: precipitation_mm
+        description: Total precipitation of the day, in mm.
+        data_tests:
+          - expression_is_true:
+              arguments:
+                expression: precipitation_mm between 0 and 2000
+      - name: precipitation_max_hourly_mm
+        description: Highest hourly precipitation of the day, in mm.
+      - name: is_wet_day
+        description: True when the precipitation reaches the wet_day_mm var (1 mm).
+
+  - name: dim_h3_cell
+    description: H3 cells covering the ERA5 grid, with their center, area and region of the rollup.
+    columns:
+      - name: h3_index
+        data_tests: [unique, not_null]
+      - name: center_latitude
+        description: Latitude of the cell center.
+      - name: center_longitude
+        description: Longitude of the cell center, from -180 to 180.
+      - name: area_km2
+        description: Area of the cell, in km².
+      - name: region_h3_index
+        description: Parent cell at the resolution of the regional rollup (region_h3_resolution var).
+        data_tests: [not_null]
+      - name: grid_points
+        description: Number of ERA5 grid points in the cell.
+
+  - name: agg_daily_region_weather
+    description: >
+      Daily weather rolled up to H3 regions (resolution 3, ~12,000 km²), with area-weighted means.
+      About 40,000 regions cover the globe, few enough for an interactive map.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [date, region_h3_index]
+    columns:
+      - name: date
+        data_tests: [not_null]
+      - name: region_h3_index
+        data_tests: [not_null]
+      - name: cells
+        description: Number of resolution 5 cells in the region with data.
+
+  - name: fct_monthly_cell_climatology
+    description: >
+      Baseline of each cell and calendar month over the baseline years (baseline_start_year and
+      baseline_end_year vars, all the processed years by default). Meaningful with several years of data.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [h3_index, month]
+    columns:
+      - name: month
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+                quote: false
+      - name: hot_day_threshold_c
+        description: Percentile (heatwave_percentile var, 90th) of the daily maximum temperature.
+      - name: wet_day_frequency
+        description: Share of wet days.
+
+  - name: fct_daily_temperature_anomaly
+    description: Daily mean temperature of each cell minus its baseline for the calendar month.
+    columns:
+      - name: temperature_anomaly_c
+        description: Difference from the baseline, in °C.
+      - name: temperature_anomaly_z
+        description: Difference from the baseline, in standard deviations of the baseline.
+
+  - name: fct_heatwave_events
+    description: >
+      Heatwaves: at least heatwave_min_days (3) consecutive days whose maximum temperature exceeds
+      the 90th percentile of the cell and calendar month. One row per event.
+    data_tests:
+      - expression_is_true:
+          arguments:
+            expression: duration_days = datediff('day', start_date, end_date) + 1
+      - expression_is_true:
+          arguments:
+            expression: duration_days >= {{ var('heatwave_min_days') }} and mean_excess_c > 0
+    columns:
+      - name: start_date
+        description: First hot day of the event.
+      - name: end_date
+        description: Last hot day of the event.
+      - name: peak_temperature_max_c
+        description: Highest daily maximum temperature of the event, in °C.
+      - name: mean_excess_c
+        description: Mean excess of the daily maximum temperature over the hot day threshold, in °C.
+
+  - name: fct_extreme_precipitation_days
+    description: >
+      Wet days whose precipitation exceeds the 95th percentile (extreme_precipitation_percentile var)
+      of the wet days of the same cell, the definition of the R95p climate index.
+    data_tests:
+      - expression_is_true:
+          arguments:
+            expression: ratio_to_threshold > 1
+
+exposures:
+  - name: weather_map
+    label: ERA5 weather map
+    type: dashboard
+    maturity: medium
+    url: http://localhost:8501
+    description: Streamlit map of the daily weather, anomalies and extreme events on H3 cells (src/dashboard).
+    depends_on:
+      - ref('agg_daily_region_weather')
+      - ref('fct_daily_cell_weather')
+      - ref('fct_daily_temperature_anomaly')
+      - ref('fct_heatwave_events')
+      - ref('fct_extreme_precipitation_days')
+      - ref('dim_h3_cell')
+    owner:
+      name: Data engineering

@@ -1,0 +1,30 @@
+version: 2
+
+models:
+  - name: stg_era5__temperature
+    description: Hourly 2m temperature converted to °C, one row per grid point and hour.
+    columns:
+      - name: observed_at
+        description: Hour of the value, UTC.
+      - name: date
+        description: UTC day of observed_at.
+      - name: temperature_c
+        description: Air temperature at 2 m, in °C.
+
+  - name: stg_era5__precipitation
+    description: Hourly precipitation converted to mm, one row per grid point and hour.
+    columns:
+      - name: observed_at
+        description: End of the hour of accumulation, UTC.
+      - name: precipitation_mm
+        description: Precipitation accumulated over the hour, in mm.
+
+  - name: stg_era5__grid_points
+    description: The ERA5 0.25° grid points with their H3 cell.
+    columns:
+      - name: h3_index
+        data_tests: [not_null]
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [latitude, longitude]

@@ -1,0 +1,16 @@
+# Paths are relative to transform/, where dbt runs; override them with the environment variables
+era5:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('DUCKDB_PATH', '../output/warehouse.duckdb') }}"
+      threads: 4
+      extensions:
+        - parquet
+        - iceberg
+        - name: h3
+          repo: community
+      settings:
+        # Iceberg tables of a SQL catalog have no version-hint file: read their latest metadata
+        unsafe_enable_version_guessing: true

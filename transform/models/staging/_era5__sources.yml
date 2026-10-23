@@ -1,0 +1,50 @@
+version: 2
+
+sources:
+  - name: era5
+    description: >
+      Hourly ERA5 reanalysis variables on the regular 0.25° grid, indexed with H3, written by the
+      ingestion pipeline (src/). ERA5_FORMAT selects the Hive-partitioned Parquet datasets
+      (parquet, default) or the Iceberg tables partitioned by day (iceberg).
+    meta:
+      external_location: >-
+        {%- if env_var('ERA5_FORMAT', 'parquet') == 'iceberg' -%}
+        iceberg_scan('{{ env_var('ERA5_ICEBERG_WAREHOUSE', '../output/iceberg') }}/{{ env_var('ERA5_ICEBERG_NAMESPACE', 'era5') }}/{name}')
+        {%- else -%}
+        read_parquet('{{ env_var('ERA5_LAKE_PATH', '../output') }}/{name}/*/*/*.parquet', hive_partitioning = true)
+        {%- endif -%}
+    tables:
+      - name: total_precipitation
+        description: Hourly total precipitation, accumulated over the hour ending at `time`.
+        columns:
+          - name: time
+            description: End of the hour of accumulation, UTC.
+          - name: latitude
+            description: Latitude of the grid point, from -90 to 90.
+          - name: longitude
+            description: Longitude of the grid point, from 0 to 360 (ERA5 convention).
+          - name: tp
+            description: Precipitation, in meters of water.
+          - name: h3_index
+            description: H3 cell containing the grid point.
+
+      - name: 2m_temperature
+        description: Hourly air temperature at 2 m above the surface.
+        columns:
+          - name: time
+            description: Hour of the value, UTC.
+          - name: latitude
+          - name: longitude
+          - name: t2m
+            description: Temperature, in Kelvin.
+          - name: h3_index
+
+      - name: h3_lookup
+        description: Grid point to H3 cell lookup table computed once by the ingestion.
+        meta:
+          external_location: >-
+            read_parquet('{{ env_var('ERA5_H3_LOOKUP_PATH', env_var('ERA5_LAKE_PATH', '../output') ~ '/h3_lookup') }}/h3_lookup_res{{ env_var('ERA5_H3_RESOLUTION', '5') }}.parquet')
+        columns:
+          - name: latitude
+          - name: longitude
+          - name: h3_index

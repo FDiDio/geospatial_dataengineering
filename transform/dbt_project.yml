@@ -1,0 +1,44 @@
+name: era5
+version: "0.2.0"
+config-version: 2
+profile: era5
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+target-path: target
+clean-targets: [target, logs]
+
+vars:
+  # Days (re)built by the incremental models, e.g. --vars '{start_date: 2022-04-01, end_date: 2022-04-30}'.
+  # Without them, the models process the days after the last one built, minus lookback_days.
+  start_date: null
+  end_date: null
+  lookback_days: 3
+  # Years of the climatological baseline, all the processed years by default
+  baseline_start_year: null
+  baseline_end_year: null
+  # H3 resolution of the regional rollup (cells are at the resolution of the ingestion, 5 by default)
+  region_h3_resolution: 3
+  # Extreme events: a hot day exceeds the baseline percentile of the daily maximum temperature
+  # of its cell and calendar month; a heatwave lasts at least heatwave_min_days hot days
+  heatwave_percentile: 0.9
+  heatwave_min_days: 3
+  # A wet day has at least wet_day_mm of precipitation; an extreme one exceeds the
+  # extreme_precipitation_percentile of the wet days of its cell
+  wet_day_mm: 1.0
+  extreme_precipitation_percentile: 0.95
+
+models:
+  era5:
+    staging:
+      +schema: staging
+      +materialized: view
+    intermediate:
+      +schema: intermediate
+      +materialized: incremental
+      +incremental_strategy: delete+insert
+      +unique_key: date
+    marts:
+      +schema: marts
+      +materialized: table
