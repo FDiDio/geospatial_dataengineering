@@ -1,22 +1,78 @@
-# Configuration File for Precipitation Data ETL Pipeline
+# Configuration File for ERA5 Data ETL Pipeline
+# Relative paths are resolved against the directory containing this file,
+# so the pipeline can be launched from any working directory.
 
 # Path to the Google Cloud Storage bucket containing the input data
 bucket_path: "gcp-public-data-arco-era5/raw/date-variable-single_level/"
 
-# Directory path where the output Parquet files will be saved
-output_path: "../output/total_precipitation"
+# Root directory of the output Parquet files.
+# Each variable is written to its own dataset: <output_path>/<variable>/year=YYYY/month=MM
+output_path: "../output"
 
 # Directory path where the query results will be saved
-query_output_path: "../output/total_precipitation/query_results"
+query_output_path: "../output/query_results"
+
+# Directory path where the precomputed H3 lookup table is cached (shared by all variables, same grid)
+h3_lookup_path: "../output/h3_lookup"
 
 # H3 Resolution
 # The resolution of H3 indices to be used for geospatial indexing (integer value).
 h3_resolution: 5
 
-# Data Variable Configuration
-# The name of the variable to extract from the dataset, e.g., 'total_precipitation' for total precipitation.
-variable_name: "total_precipitation"
+# Variables to process, among the supported ones (see src/utils/variables.py):
+#   total_precipitation: column 'tp', meters, aggregates: sum (reported in mm)
+#   2m_temperature:      column 't2m', Kelvin, aggregates: mean, min, max (reported in °C)
+variables:
+  - total_precipitation
+  - 2m_temperature
 
 # File Name
-# The name of the file to process within the bucket for each date (e.g., 'surface.nc').
+# The name of the file to process within the bucket for each date and variable (e.g., 'surface.nc').
 file_name: "surface.nc"
+
+# Number of attempts for each daily download before the day is marked as failed
+max_retries: 3
+
+# Sample Queries
+# Each query targets one variable and supports any combination of the following filters:
+#   start / end: date range in YYYY-MM-DD format, both days included
+#   h3_index:    H3 cell identifier
+#   bbox:        {lat_min, lat_max, lon_min, lon_max}, longitudes in the ERA5 0-360 convention
+#   point:       {latitude, longitude, tolerance}, nearest grid point within the tolerance (degrees)
+# aggregate: one or a list of the aggregates supported by the variable; the values are
+# reported in the log instead of saving the rows to Parquet.
+queries:
+  - name: time_range
+    variable: total_precipitation
+    start: "2022-01-15"
+    end: "2022-03-31"
+
+  - name: geo_time_range
+    variable: total_precipitation
+    h3_index: "85df6c57fffffff"
+    start: "2022-05-01"
+    end: "2022-06-30"
+
+  - name: h3_index
+    variable: total_precipitation
+    h3_index: "85032097fffffff"
+
+  - name: zurich_april_total
+    variable: total_precipitation
+    point: {latitude: 47.25, longitude: 8.5, tolerance: 0.01}
+    start: "2022-04-01"
+    end: "2022-04-30"
+    aggregate: sum
+
+  - name: zurich_april_temperature
+    variable: 2m_temperature
+    point: {latitude: 47.25, longitude: 8.5, tolerance: 0.01}
+    start: "2022-04-01"
+    end: "2022-04-30"
+    aggregate: [mean, min, max]
+
+  - name: po_valley_july_temperature
+    variable: 2m_temperature
+    bbox: {lat_min: 44.5, lat_max: 45.5, lon_min: 8.0, lon_max: 12.0}
+    start: "2022-07-01"
+    end: "2022-07-31"

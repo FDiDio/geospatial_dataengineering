@@ -1,0 +1,18 @@
+services:
+  # docker compose run --rm pipeline --start_date 20220430 --end_date 20220430
+  pipeline:
+    build:
+      context: .
+      target: runtime
+    image: era5-pipeline
+    # On Linux, run as the host user so the files in ./output belong to it
+    user: "${UID:-1000}:${GID:-1000}"
+    volumes:
+      - ./output:/app/output
+
+  # docker compose run --rm tests
+  tests:
+    build:
+      context: .
+      target: test
+    image: era5-pipeline:test

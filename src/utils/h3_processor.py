@@ -1,4 +1,11 @@
+import logging
+import os
 import h3
+import pandas as pd
+from utils.data_writer import write_parquet_atomic
+
+logger = logging.getLogger(__name__)
+
 
 def precompute_h3_index_lookup(df, resolution=5):
     """
@@ -11,13 +18,15 @@ def precompute_h3_index_lookup(df, resolution=5):
     Returns:
         pd.DataFrame: A lookup table with unique coordinates and H3 indices.
     """
-    print("Precomputing H3 lookup table")
-    
-    unique_coords = df[['latitude', 'longitude']].drop_duplicates()
-    unique_coords['h3_index'] = unique_coords.apply(
-        lambda row: h3.latlng_to_cell(row['latitude'], row['longitude'], resolution), axis=1
-    )
+    logger.info("Precomputing H3 lookup table at resolution %d", resolution)
+
+    unique_coords = df[['latitude', 'longitude']].drop_duplicates().reset_index(drop=True)
+    unique_coords['h3_index'] = [
+        h3.latlng_to_cell(lat, lon, resolution)
+        for lat, lon in zip(unique_coords['latitude'].tolist(), unique_coords['longitude'].tolist())
+    ]
     return unique_coords
+
 
 def map_h3_indices_to_dataframe(df, h3_lookup):
     """
@@ -30,6 +39,44 @@ def map_h3_indices_to_dataframe(df, h3_lookup):
     Returns:
         pd.DataFrame: DataFrame with H3 indices mapped to it.
     """
-    print("Mapping H3 indices to the DataFrame")
+    logger.info("Mapping H3 indices to the DataFrame")
     df_with_h3 = df.merge(h3_lookup, on=['latitude', 'longitude'], how='left')
     return df_with_h3
+
+
+def lookup_file_path(lookup_dir, resolution):
+    """Return the path of the cached lookup table for the given resolution."""
+    return os.path.join(lookup_dir, f"h3_lookup_res{resolution}.parquet")
+
+
+def enrich_with_h3(df, resolution, lookup_dir, h3_lookup=None):
+    """
+    Add H3 indices to the DataFrame, reusing a lookup table whenever it covers the grid.
+
+    The ERA5 grid is identical every day, so the lookup is computed once, cached on
+    disk and reused by the following days and by later runs. It is recomputed only
+    if some coordinates of the DataFrame are missing from it.
+
+    Args:
+        df (pd.DataFrame): DataFrame containing latitude and longitude columns.
+        resolution (int): H3 resolution for geospatial indexing.
+        lookup_dir (str): Directory where the lookup table is cached.
+        h3_lookup (pd.DataFrame): Lookup table already in memory, if any.
+
+    Returns:
+        tuple: The DataFrame with H3 indices and the lookup table used.
+    """
+    path = lookup_file_path(lookup_dir, resolution)
+    if h3_lookup is None and os.path.exists(path):
+        logger.info("Loading cached H3 lookup table from %s", path)
+        h3_lookup = pd.read_parquet(path)
+
+    if h3_lookup is not None:
+        df_with_h3 = map_h3_indices_to_dataframe(df, h3_lookup)
+        if not df_with_h3['h3_index'].isna().any():
+            return df_with_h3, h3_lookup
+        logger.info("H3 lookup table does not cover the current grid, recomputing it")
+
+    h3_lookup = precompute_h3_index_lookup(df, resolution)
+    write_parquet_atomic(h3_lookup, path)
+    return map_h3_indices_to_dataframe(df, h3_lookup), h3_lookup
