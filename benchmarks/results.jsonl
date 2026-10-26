@@ -1,0 +1,6 @@
+{"label": "baseline: original code", "variable_days": 8, "seconds": 550.5, "seconds_per_variable_day": 68.81, "peak_memory_gb": 3.24, "exit_code": 0, "args": [], "date": "2026-10-23T12:58:47"}
+{"label": "netcdf, 1 worker", "variable_days": 8, "seconds": 90.0, "seconds_per_variable_day": 11.25, "peak_memory_gb": 2.55, "exit_code": 0, "args": ["--workers", "1", "--source", "netcdf"], "date": "2026-10-23T13:00:25"}
+{"label": "netcdf, 4 workers", "variable_days": 8, "seconds": 38.2, "seconds_per_variable_day": 4.78, "peak_memory_gb": 5.34, "exit_code": 0, "args": ["--workers", "4", "--source", "netcdf"], "date": "2026-10-23T13:01:03"}
+{"label": "netcdf, 8 workers", "variable_days": 8, "seconds": 30.0, "seconds_per_variable_day": 3.75, "peak_memory_gb": 9.84, "exit_code": 0, "args": ["--workers", "8", "--source", "netcdf"], "date": "2026-10-23T13:01:34"}
+{"label": "zarr, 1 worker", "variable_days": 8, "seconds": 89.6, "seconds_per_variable_day": 11.2, "peak_memory_gb": 2.52, "exit_code": 0, "args": ["--workers", "1", "--source", "zarr"], "date": "2026-10-23T13:03:04"}
+{"label": "zarr, 4 workers", "variable_days": 8, "seconds": 33.8, "seconds_per_variable_day": 4.22, "peak_memory_gb": 5.92, "exit_code": 0, "args": ["--workers", "4", "--source", "zarr"], "date": "2026-10-23T13:03:38"}
