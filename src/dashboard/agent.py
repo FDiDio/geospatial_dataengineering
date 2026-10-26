@@ -1,6 +1,8 @@
 """
 An agent that answers questions about the weather of any place in plain language, with an open model served
-by Ollama: by default Qwen3 8B, which fits in the 8 GB of a laptop GPU.
+by Ollama: by default Qwen3 8B, which fits in the 8 GB of a laptop GPU. A host without a GPU, as Streamlit
+Community Cloud, gets the model from Ollama Cloud: OLLAMA_HOST=https://ollama.com and a key in OLLAMA_API_KEY,
+which the Ollama client sends by itself.
 
 The model picks the tools and writes SQL; the tools compute every number from the same sources as the
 dashboard (ERA5, then ECMWF IFS and its forecast). The model never does the arithmetic, so the numbers of
@@ -31,6 +33,10 @@ from dashboard import archive, places, queries, terrain
 
 MODEL = os.environ.get("AGENT_MODEL", "qwen3:8b")
 HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+CLOUD = "ollama.com" in HOST
+# The models offered, separated by commas, by default all those of the server: Ollama Cloud serves dozens, the
+# largest of them slow and costly for the quota of a public demo
+MODELS = [model.strip() for model in os.environ.get("AGENT_MODELS", "").split(",") if model.strip()]
 # Model turns for a question: an answer takes 2 or 3, a query to fix one more
 MAX_STEPS = 8
 # Tokens of context: the prompt and the tools take about 1,000, each turn up to about 1,500 more. Qwen3 8B
@@ -398,9 +404,13 @@ def ask(
 
 
 def available_models(client: Any = None) -> list[str]:
-    """The models Ollama has downloaded; raises when Ollama does not answer within a few seconds."""
+    """
+    The models of the server, those of AGENT_MODELS if set; raises when the server does not answer within a
+    few seconds.
+    """
     client = client or ollama.Client(host=HOST, timeout=5)
-    return sorted(model.model for model in client.list().models)
+    models = sorted(model.model for model in client.list().models)
+    return [model for model in models if model in MODELS] if MODELS else models
 
 
 if __name__ == "__main__":

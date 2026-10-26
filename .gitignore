@@ -12,6 +12,9 @@ benchmarks/.cache/
 *.parquet
 .*.tmp
 
+# Streamlit secrets: the Ollama Cloud key
+.streamlit/secrets.toml
+
 # Editors and OS
 .vscode/
 .idea/

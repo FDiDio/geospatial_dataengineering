@@ -9,6 +9,7 @@ import duckdb
 import ollama
 import pandas as pd
 import pytest
+import streamlit as st
 from conftest import fake_archive_fetch
 from streamlit.testing.v1 import AppTest
 
@@ -473,6 +474,19 @@ def test_summary_scores_each_model():
     assert row["wrong place"] == 1
 
 
+def test_available_models_offers_those_of_agent_models(monkeypatch):
+    class Server:
+        def list(self):
+            names = ("kimi-k3", "gpt-oss:20b", "gpt-oss:120b")
+            return ollama.ListResponse(models=[ollama.ListResponse.Model(model=name) for name in names])
+
+    assert agent.available_models(Server()) == ["gpt-oss:120b", "gpt-oss:20b", "kimi-k3"]
+
+    monkeypatch.setattr(agent, "MODELS", ["gpt-oss:20b", "qwen3:8b"])
+
+    assert agent.available_models(Server()) == ["gpt-oss:20b"]
+
+
 def fake_ollama(monkeypatch, models=("qwen3:4b", "qwen3:8b"), ask=None):
     """Ollama replaced by fakes for the page of the agent, and an evaluation of Qwen3 8B."""
 
@@ -580,3 +594,30 @@ def test_ask_page_shows_when_the_model_fails(monkeypatch):
     assert not app.exception
     assert app.status[0].label == "The model did not answer" and "not found" in app.error[0].value
     assert app.chat_input  # the page stays, to ask again
+
+
+def test_ask_page_says_when_ollama_cloud_does_not_answer(monkeypatch):
+    monkeypatch.setattr(agent, "CLOUD", True)
+    app = ask_page(monkeypatch, models=None)
+
+    assert not app.exception
+    assert app.caption[0].value.startswith("An open model served by Ollama Cloud")
+    assert app.error[0].value == "Ollama Cloud does not answer: Failed to connect to Ollama" and not app.chat_input
+
+
+def test_ask_page_answers_a_number_of_questions_an_hour(monkeypatch):
+    monkeypatch.setenv("AGENT_QUESTIONS_PER_HOUR", "2")
+    st.cache_resource.clear()  # the questions asked by other tests
+    app = ask_page(monkeypatch, ask=lambda question, *args, **kwargs: agent.Answer("Sì.", "qwen3:8b"))
+    for question in ["Piove a Roma?", "E a Milano?"]:
+        app.chat_input[0].set_value(question).run(timeout=60)
+
+    assert len(app.chat_message) == 4 and not app.warning
+
+    app.chat_input[0].set_value("E a Napoli?").run(timeout=60)
+
+    assert not app.exception
+    assert len(app.chat_message) == 4  # not answered
+    assert app.warning[0].value == (
+        "This demo answers 2 questions an hour, to all its visitors together: ask again in 60 minutes."
+    )

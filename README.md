@@ -339,8 +339,9 @@ uv run streamlit run src/dashboard/app.py   # the Ask the weather page
 Ollama model that calls tools) and thinking, and shows its latest evaluation score. Follow-up questions are answered
 with the earlier turns, and **How I got it**, above each answer, shows every tool call with its SQL and its result;
 numbers the data did not give get a warning under the answer.
-`AGENT_MODEL` and `OLLAMA_HOST` set the default model and the server. Without Ollama, as on Streamlit Community Cloud,
-the page says how to start it.
+`AGENT_MODEL` and `OLLAMA_HOST` set the default model and the server, `AGENT_MODELS` the models offered (by default all
+those of the server). Without Ollama the page says how to start it; a host without a GPU gets the model from
+[Ollama Cloud](#streamlit-community-cloud).
 
 ### Evaluation
 
@@ -437,6 +438,22 @@ The [Dockerfile](Dockerfile) builds three images with uv from the lockfile: `run
 docker compose run --rm pipeline --start_date 20220701 --end_date 20220707 --workers 4
 docker compose up dagster-webserver dagster-daemon dashboard   # :3000 and :8501
 docker compose run --rm tests
+```
+
+### Streamlit Community Cloud
+
+The dashboard runs on [Streamlit Community Cloud](https://share.streamlit.io) from this repository: main file
+`src/dashboard/app.py`, Python 3.12. It installs [src/dashboard/requirements.txt](src/dashboard/requirements.txt), the
+dashboard alone. The explorer needs nothing more. The agent gets its model from [Ollama Cloud](https://ollama.com), the
+same open models served on its GPUs, with a key of an Ollama account. In the secrets of the app, which Streamlit sets
+as environment variables:
+
+```toml
+OLLAMA_HOST = "https://ollama.com"
+OLLAMA_API_KEY = "<key of ollama.com/settings/keys>"
+AGENT_MODEL = "gpt-oss:20b"
+AGENT_MODELS = "gpt-oss:20b"
+AGENT_QUESTIONS_PER_HOUR = "20"   # to all the visitors together: they share the quota of the key and of Open-Meteo
 ```
 
 ### Google Cloud with Terraform

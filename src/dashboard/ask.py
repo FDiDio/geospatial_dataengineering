@@ -1,12 +1,15 @@
 """
 The page of the dashboard, app.py, where an agent answers questions about the weather in plain language: an
-open model served by Ollama on this computer picks the tools and writes the SQL, and the data of the explorer
-gives every number. Without Ollama the page says how to start it.
+open model served by Ollama, on this computer or on Ollama Cloud, picks the tools and writes the SQL, and the
+data of the explorer gives every number. Without Ollama the page says how to start it.
 """
 
+import collections
 import json
+import math
 import os
 import sys
+import time
 
 import streamlit as st
 
@@ -29,6 +32,24 @@ DONE = {
 }
 # Lines of a tool result shown before it scrolls
 RESULT_LINES = 12
+# Questions answered in an hour, to all the visitors together, by default with no limit: a public demo shares
+# the quota of its Ollama Cloud key, and the Open-Meteo quota of its host
+QUESTIONS_PER_HOUR = int(os.environ.get("AGENT_QUESTIONS_PER_HOUR", "0"))
+
+
+@st.cache_resource
+def asked() -> collections.deque[float]:
+    """The times of the questions of the last hour, shared by the sessions of all the visitors."""
+    return collections.deque()
+
+
+def minutes_to_wait(times: collections.deque[float], now: float) -> int:
+    """Minutes before a question can be answered within the questions of an hour, 0 when it can be now."""
+    while times and times[0] <= now - 3600:
+        times.popleft()
+    if not QUESTIONS_PER_HOUR or len(times) < QUESTIONS_PER_HOUR:
+        return 0
+    return math.ceil((times[0] + 3600 - now) / 60)
 
 
 def pretty(result: str) -> str:
@@ -95,22 +116,28 @@ def eval_score(model: str, think: bool) -> str | None:
 
 st.title("Ask the weather")
 st.caption(
-    "An open model running on this computer with Ollama finds the place and writes SQL on the data of the explorer: "
-    "ERA5 since 1940, then ECMWF IFS and its forecast. Every number comes from a query: open **How I got it** "
-    "to check them."
+    f"An open model {'served by Ollama Cloud' if agent.CLOUD else 'running on this computer with Ollama'} finds the "
+    "place and writes SQL on the data of the explorer: ERA5 since 1940, then ECMWF IFS and its forecast. Every "
+    "number comes from a query: open **How I got it** to check them."
 )
 
 try:
     models = agent.available_models()
-except Exception:  # Ollama is not installed or not running
-    st.info(
-        f"The agent needs [Ollama](https://ollama.com) running at {agent.HOST}, with a model that calls tools: "
-        "install it, then download the model with `ollama pull qwen3:8b`.",
-        icon=":material/info:",
-    )
+except Exception as error:  # Ollama is not installed or not running, or Ollama Cloud is out of reach
+    if agent.CLOUD:
+        st.error(f"Ollama Cloud does not answer: {error}", icon=":material/error:")
+    else:
+        st.info(
+            f"The agent needs [Ollama](https://ollama.com) running at {agent.HOST}, with a model that calls tools: "
+            "install it, then download the model with `ollama pull qwen3:8b`.",
+            icon=":material/info:",
+        )
     st.stop()
 if not models:
-    st.info("Ollama has no model yet: download one with `ollama pull qwen3:8b`.", icon=":material/info:")
+    if agent.CLOUD:
+        st.error(f"Ollama Cloud serves none of the models of AGENT_MODELS: {', '.join(agent.MODELS)}.")
+    else:
+        st.info("Ollama has no model yet: download one with `ollama pull qwen3:8b`.", icon=":material/info:")
     st.stop()
 
 chat = st.session_state.setdefault("chat", [])
@@ -140,7 +167,15 @@ if not chat and not question:
         for example in EXAMPLES:
             st.button(example, on_click=st.session_state.update, kwargs={"example": example})
 
-if question:
+if question and (wait := minutes_to_wait(asked(), time.time())):
+    st.warning(
+        f"This demo answers {QUESTIONS_PER_HOUR} questions an hour, to all its visitors together: ask again in "
+        f"{wait} minute{'s' if wait > 1 else ''}.",
+        icon=":material/hourglass_top:",
+    )
+elif question:
+    if QUESTIONS_PER_HOUR:
+        asked().append(time.time())
     history = [{"role": message["role"], "content": message["content"]} for message in chat]
     with st.chat_message("user"):
         st.markdown(question)
