@@ -276,8 +276,8 @@ where a first click zooms in, and around a place 20 km by default, or from 138 t
 **Hexagons** control, which also sizes the cell of the place and its altitude (its weather stays the 28 km ERA5 grid).
 The **Zoom out / Zoom in / Recenter** buttons replace the zoom buttons of the map, whose clicks would fall through to
 the hexagons under them. The theme is in [.streamlit/config.toml](.streamlit/config.toml). On phones, narrower than 640 px, the map is shorter,
-as a finger dragging on it moves the map and not the page, the tiles come two a row, and a line says where the search
-is, the sidebar starting closed. The page speaks plainly: the models are named in the credits only. It comes on demand from the ERA5 archive of
+as a finger dragging on it moves the map and not the page, and the tiles come two a row. The sidebar, with the
+search, starts open there too, and closes once a place is chosen, to show its weather. The page speaks plainly: the models are named in the credits only. It comes on demand from the ERA5 archive of
 [Open-Meteo](https://open-meteo.com) (`models=era5`, the 0.25° grid of the pipeline; free for non-commercial use,
 CC BY 4.0): Open-Meteo stores ERA5 as time series, so a month of a place takes one small request, where the ARCO-ERA5
 Zarr store holds one global field per hour. ERA5 comes about five days behind real time: the days it has not

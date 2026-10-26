@@ -15,7 +15,7 @@ import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from dashboard import agent, agent_eval
+from dashboard import agent, agent_eval, phone
 
 EXAMPLES = [
     "Quanti giorni sopra 30 °C ha avuto Milano nel luglio 2022?",
@@ -150,6 +150,10 @@ with st.sidebar:
     if score := eval_score(model, think):
         st.caption(score)
     st.button("New conversation", icon=":material/add_comment:", on_click=chat.clear)
+    # On a phone the sidebar, open at the start for the search of the weather page, would cover the chat
+    if not st.session_state.get("asked_page_shown"):
+        st.session_state["asked_page_shown"] = True
+        st.html(phone.close_sidebar(), unsafe_allow_javascript=True)
 
 # The input stays at the bottom of the page; read first, so that the examples go as soon as a question comes
 question = st.chat_input("Ask about the weather of any place, from 1940 to the next two weeks")

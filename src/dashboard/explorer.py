@@ -22,7 +22,7 @@ import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from dashboard import archive, places, queries, terrain
+from dashboard import archive, phone, places, queries, terrain
 from dashboard.queries import DEFAULT_WAREHOUSE, LAYERS, REGIONS, colorize, scale_colors
 
 WORLD = "World"
@@ -359,6 +359,12 @@ with st.sidebar:
         "Weather: ERA5 reanalysis (Copernicus), then ECMWF IFS for the last days and the forecast, via "
         "Open-Meteo · Altitude: Copernicus DEM 90 m · Places: © OpenStreetMap contributors"
     )
+    # On a phone the sidebar, open for the search, covers the page: it closes once a new place is chosen, to show
+    # its weather
+    if place is not None and st.session_state.get("shown_place") != place:
+        st.session_state["shown_place"] = place
+        st.session_state["places_shown"] = st.session_state.get("places_shown", 0) + 1
+        st.html(phone.close_sidebar(st.session_state["places_shown"]), unsafe_allow_javascript=True)
 
 st.title("Weather anywhere")
 st.caption(

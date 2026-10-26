@@ -33,7 +33,8 @@ PHONE_CSS = """
 }
 """
 
-st.set_page_config(page_title="Weather anywhere", page_icon="🌍", layout="wide")
+# The sidebar, with the search, open on phones too: closed, people missed it
+st.set_page_config(page_title="Weather anywhere", page_icon="🌍", layout="wide", initial_sidebar_state="expanded")
 # The values of the metrics in the code font of the theme, with digits of one width, as on an instrument panel
 st.html(
     "<style>[data-testid='stMetricValue'] {font-family: 'JetBrains Mono', monospace; letter-spacing: -0.03em;"

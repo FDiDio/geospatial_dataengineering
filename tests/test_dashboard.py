@@ -459,6 +459,25 @@ def metrics(block):
     return {metric.label: metric.value for metric in block.metric}
 
 
+def test_a_new_place_closes_the_sidebar_of_a_phone_once(monkeypatch, tmp_path):
+    def scripts():
+        return [
+            element.proto.body for element in app.sidebar.get("html") if "stSidebarCollapseButton" in element.proto.body
+        ]
+
+    app = run_app(monkeypatch, tmp_path)
+    assert not scripts()  # no place yet
+
+    app.sidebar.text_input[0].set_value("Zurich").run(timeout=60)
+    assert [script.count("run 1") for script in scripts()] == [1]
+
+    app.sidebar.date_input[0].set_value(date(2022, 7, 15)).run(timeout=60)
+    assert not scripts()  # the same place: the sidebar stays as the visitor left it
+
+    app.sidebar.text_input[0].set_value("47.40, 8.50").run(timeout=60)
+    assert [script.count("run 2") for script in scripts()] == [1]  # numbered, so that the browser runs it again
+
+
 def test_dashboard_shows_a_place_without_a_warehouse(monkeypatch, tmp_path):
     app = run_app(monkeypatch, tmp_path)
     assert not app.exception and not app.expander
