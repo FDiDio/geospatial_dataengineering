@@ -180,19 +180,19 @@ def test_dashboard_renders(built, monkeypatch):
     assert not app.exception
     assert app.subheader[0].value == "Zürich"
     assert [tab.label.split(": ", 1)[-1] for tab in app.tabs] == [
+        "Day · 31 May 2022",
         "Month · May 2022",
         "Year · 2022",
-        "Day · 31 May 2022",
     ]
-    assert len(app.dataframe) == 4  # the days of the month, the months of the year, the hours and the data of the map
+    assert len(app.dataframe) == 4  # the hours, the days of the month, the months of the year and the data of the map
     # A day out of the warehouse: the weather of the place, no map
     app.sidebar.date_input[0].set_value(date(2022, 7, 15)).run(timeout=60)
     assert not app.exception
     assert any("ingested days only" in caption.value for caption in app.caption)
     assert [tab.label.split(": ", 1)[-1] for tab in app.tabs] == [
+        "Day · 15 Jul 2022",
         "Month · July 2022",
         "Year · 2022",
-        "Day · 15 Jul 2022",
     ]
 
 

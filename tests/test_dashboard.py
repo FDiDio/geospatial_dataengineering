@@ -478,11 +478,12 @@ def test_dashboard_shows_a_place_without_a_warehouse(monkeypatch, tmp_path):
     assert (altitude.value, altitude.delta) == ("412 m", "390–870 m")
     # The finest hexagon by default, 2.8 km across
     assert any(":material/hexagon: 5 km² hexagon" in markdown.value for markdown in app.markdown)
-    month_tab, year_tab, _ = app.tabs
+    # The day first, open by default, then its month and its year
+    _, month_tab, year_tab = app.tabs
     assert [tab.label.split(": ", 1)[-1] for tab in app.tabs] == [
+        "Day · 15 Jul 2022",
         "Month · July 2022",
         "Year · 2022",
-        "Day · 15 Jul 2022",
     ]
     month = metrics(month_tab)
     assert (month["Average high"], month["Average low"], month["Average"]) == ("41.0 °C", "31.0 °C", "36.0 °C")
@@ -505,7 +506,7 @@ def test_dashboard_shows_a_place_without_a_warehouse(monkeypatch, tmp_path):
     # July: 6 h of sun + the day modulo 3 a day, 60 % of humidity + the day modulo 10
     assert (month["Total sunshine"], month["Average humidity"]) == ("217.0 h", "64.4 %")
     assert metrics(year_tab)["Wet days"] == "179 of 365"  # the even days: 15 a month, 14 in February
-    days, months, hours = (frame.value for frame in app.dataframe)
+    hours, days, months = (frame.value for frame in app.dataframe)
     assert len(days) == 31 and list(days.columns[:4]) == ["Day", "Sky", "High", "Average"]
     assert list(days["Sky"][:2]) == ["🌤️ Mainly clear", "🌦️ Light rain"]
     assert len(months) == 12 and list(months.columns[:4]) == ["Month", "Average high", "Average low", "Average"]
@@ -586,11 +587,11 @@ def test_today_is_a_forecast_left_out_of_the_statistics(monkeypatch, tmp_path):
 
     assert not app.exception
     assert any(":material/online_prediction: Forecast]" in markdown.value for markdown in app.markdown)
-    days = app.dataframe[0].value
+    days = app.dataframe[1].value  # the Month tab, after the Day tab
     assert "Forecast" in set(days["Source"]) and set(days["Source"]) <= {"Historical", "Recent", "Forecast"}
     gone_by = int((days["Source"] != "Forecast").sum())
     if gone_by:
-        assert metrics(app.tabs[0])["Wet days"].endswith(f"of {gone_by}")
+        assert metrics(app.tabs[1])["Wet days"].endswith(f"of {gone_by}")
 
 
 def test_zoom_buttons_and_hexagon_sizes(monkeypatch, tmp_path):
@@ -649,6 +650,6 @@ def test_a_day_published_up_to_the_evening_has_no_daily_values(monkeypatch, tmp_
     notice = app.info[-1].value  # after the one of the missing warehouse
     assert "not complete yet" in notice and "19:00" in notice
     assert "High" not in metrics(app.main)
-    days, months, hours = (frame.value for frame in app.dataframe)
+    hours, days, months = (frame.value for frame in app.dataframe)
     assert (len(days), len(months), len(hours)) == (30, 12, 20)
     assert any("up to 19:00" in caption.value for caption in app.caption)

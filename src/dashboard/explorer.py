@@ -689,11 +689,12 @@ if place is not None and cell is not None:
             )
 
     if weather is not None:
-        month_tab, year_tab, day_tab = st.tabs(
+        # The day first, open by default, then its month and its year
+        day_tab, month_tab, year_tab = st.tabs(
             [
+                f":material/schedule: Day · {day:%d %b %Y}",
                 f":material/calendar_month: Month · {day:%B %Y}",
                 f":material/bar_chart: Year · {day:%Y}",
-                f":material/schedule: Day · {day:%d %b %Y}",
             ]
         )
         on_day = alt.Tooltip("date:T", format="%a %d %b", title="Day")

@@ -268,7 +268,7 @@ precipitation, sunshine, humidity and wind (mean speed at 10 m, dominant directi
 hours, strongest gust); its month, with the averages of the highs, lows and
 means, the extremes, total precipitation, wet days, mean wind, strongest gust and a table of every day; its year,
 with the same statistics month by month; and the hourly temperature, precipitation and wind, with arrows pointing
-where it blows, in local time. Its H3 cell (resolution
+where it blows, in local time. Its tabs open on the day, then come its month and its year. Its H3 cell (resolution
 5, about 250 km²) is outlined on the map, with its **mean altitude** and range, sampled at 49 points of the Copernicus
 90 m elevation model (Open-Meteo elevation API). The map is clickable everywhere through H3 cells drawn under it
 (deck.gl reports the clicked object, not the coordinates), lit under the pointer: about 360 km across on the world,
