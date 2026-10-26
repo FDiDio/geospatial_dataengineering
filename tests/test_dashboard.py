@@ -370,6 +370,27 @@ def test_pick_cells_cover_the_world_or_a_window():
     assert len(window) > 100 and all(h3.get_resolution(cell) == 5 for cell in window["h3"])
     assert all(bbox[0] <= lat <= bbox[1] and bbox[2] <= lon <= bbox[3] for lat, lon in centers)
     assert window["value_text"][0].endswith("° · click for its weather")
+    assert pick_cells(bbox, 3, "click to go there")["value_text"][0].endswith("° · click to go there")
+
+
+def test_around_a_place_coarser_hexagons_take_the_map_there(monkeypatch, tmp_path):
+    taken = []
+    monkeypatch.setattr(places, "clicked_point", lambda state, layers: taken.append(list(layers)))
+    app = run_app(monkeypatch, tmp_path)
+    app.sidebar.text_input[0].set_value("Zurich").run(timeout=60)
+
+    deck = json.loads(app.get("deck_gl_json_chart")[0].proto.json)
+    clickable = [layer for layer in deck["layers"] if layer["id"].endswith("-0") and layer.get("pickable")]
+    hexagons = {layer["id"].removesuffix("-0"): layer["data"] for layer in clickable}
+
+    # The world, the hexagons two sizes coarser than the place's around it, and the fine ones, each drawn over
+    # the coarser: a click takes the topmost
+    assert list(hexagons) == ["world", "near", "pick"]
+    resolutions = {name: {h3.get_resolution(row["h3"]) for row in data} for name, data in hexagons.items()}
+    assert resolutions == {"world": {2}, "near": {5}, "pick": {7}}
+    assert hexagons["near"][0]["value_text"].endswith("click to go there")
+    assert hexagons["pick"][0]["value_text"].endswith("click for its weather")
+    assert "near-0" in taken[-1]
 
 
 def test_the_clickable_window_keeps_its_number_of_hexagons_at_every_size():

@@ -100,10 +100,12 @@ def hexagon_size(resolution: int) -> str:
     return f"{across:.0f} km" if across >= 10 else f"{across:.1f} km"
 
 
-def pick_cells(bbox: tuple[float, float, float, float] | None, resolution: int) -> pd.DataFrame:
+def pick_cells(
+    bbox: tuple[float, float, float, float] | None, resolution: int, hint: str = "click for its weather"
+) -> pd.DataFrame:
     """
-    Hexagons covering a bounding box, or the world, with the coordinates of their center as tooltip:
-    drawn invisible under the map, they make every point of it clickable.
+    Hexagons covering a bounding box, or the world, with the coordinates of their center and what a click
+    does as tooltip: drawn invisible under the map, they make every point of it clickable.
     """
     if bbox is None:
         cells = [child for cell in h3.get_res0_cells() for child in h3.cell_to_children(cell, resolution)]
@@ -113,7 +115,7 @@ def pick_cells(bbox: tuple[float, float, float, float] | None, resolution: int) 
         outline = [(lat_min, lon_min), (lat_min, lon_max), (lat_max, lon_max), (lat_max, lon_min)]
         cells = list(h3.polygon_to_cells(h3.LatLngPoly(outline), resolution))
     centers = [h3.cell_to_latlng(cell) for cell in cells]
-    tooltips = [f"{lat:.2f}°, {lon:.2f}° · click for its weather" for lat, lon in centers]
+    tooltips = [f"{lat:.2f}°, {lon:.2f}° · {hint}" for lat, lon in centers]
     return pd.DataFrame({"h3": cells, "value_text": tooltips})
 
 
