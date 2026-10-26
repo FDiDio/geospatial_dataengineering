@@ -31,7 +31,8 @@ reach of a quick question. This project makes it usable in two ways:
   app compares the same place and keeps complete local days only.
 - **An LLM picks queries well and handles numbers badly:** the agent answers 20 of 23 evaluation questions, and each of
   its guards comes from a failure. It made up numbers from a partial result, cut a result with `LIMIT`, followed
-  DuckDB's advice to use `ANY_VALUE`, and rounded 7.962 to 7.9 ([Weather agent](#weather-agent)).
+  DuckDB's advice to use `ANY_VALUE`, rounded 7.962 to 7.9, and gave the rain of 15 Januaries as the mean of one
+  ([Weather agent](#weather-agent)).
 
 <!--
 | The weather of a place: day, month and year | The agent: an answer and how it got it |
@@ -299,7 +300,7 @@ picks the tools and writes SQL, and the tools compute every number from the same
 
 | Tool | What it does |
 |---|---|
-| `query_days` | Runs a DuckDB `SELECT` on the table `days` of a place, up to 31 years: highs, lows, means, precipitation, sunshine, humidity, wind, weather code and source of each day |
+| `query_days` | Runs a DuckDB `SELECT` on the table `days` of a place, up to 31 years: highs, lows, means, precipitation, sunshine, humidity, wind, weather code and source of each day; and on the view `months`: the means and totals of each month of each year |
 | `query_hours` | Runs the same on the table `hours`, up to a year, in local time |
 | `cell_altitude` | Gives the mean, lowest and highest altitude of the H3 cell of a place |
 | `find_place` | Geocodes a name with Nominatim: up to 3 matches, to choose among places of the same name |
@@ -328,6 +329,13 @@ made up the numbers. Now:
 
 The same question now takes one query, `SELECT AVG(temperature_mean_c) FROM days` over 2016 to 2025, and gets 14.8 °C.
 
+Another failure shaped the tables. Asked the mean high, low and precipitation of each month over 15 years in Lugano,
+Qwen3 8B summed the days of each month: the 15 Januaries together, 991.9 mm instead of 66.1. The prompt showed the
+right query, a sum divided by the years, and the model had copied it when asked the precipitation alone. Instead of
+more instructions, `query_days` now has the view `months`, the totals of each month of each year computed by the code:
+the mean of each month is an `AVG`, the query a model writes anyway. DuckDB computes the view only for the queries
+that read it, from the days already loaded.
+
 ```bash
 winget install Ollama.Ollama        # or the installer of ollama.com; then:
 ollama pull qwen3:8b
@@ -345,10 +353,10 @@ those of the server). Without Ollama the page says how to start it; a host witho
 
 ### Evaluation
 
-[src/dashboard/agent_eval.py](src/dashboard/agent_eval.py) asks 23 questions in Italian about 18 places and grades the
+[src/dashboard/agent_eval.py](src/dashboard/agent_eval.py) asks 24 questions in Italian about 18 places and grades the
 answers by their numbers. The questions cover counts, extremes, totals, means, two periods at once, an hour, an
 altitude, tomorrow's forecast and long periods: the annual means of 10 years, a 30-year climate normal, the wettest
-month of a year, and the mean high and precipitation of each month over 11 years. The expected numbers are computed by code at each run, from the same data, at the
+month of a year, and the mean high and precipitation of each month over 11 and 15 years. The expected numbers are computed by code at each run, from the same data, at the
 coordinates the agent queried. They follow the forecast, and they follow the point: Open-Meteo corrects the
 temperature of a grid cell for the altitude of the point, and Nominatim can give a city and its region, 15 km apart,
 under the same name. An answer passes when the agent read the data of one of the geocoder's matches and the answer

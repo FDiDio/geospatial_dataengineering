@@ -39,15 +39,15 @@ CLOUD = "ollama.com" in HOST
 MODELS = [model.strip() for model in os.environ.get("AGENT_MODELS", "").split(",") if model.strip()]
 # Model turns for a question: an answer takes 2 or 3, a query to fix one more
 MAX_STEPS = 8
-# Tokens of context: the prompt and the tools take about 1,000, each turn up to about 1,500 more. Qwen3 8B
+# Tokens of context: the prompt and the tools take about 1,500, each turn up to about 1,500 more. Qwen3 8B
 # with 8,192 still fits in 8 GB of GPU memory.
 CONTEXT = 8192
 # A conversation stops when it would leave fewer tokens than this for the next turn: else Ollama would drop
 # its beginning, the instructions and the question, without a word, and the model answer without them
 CONTEXT_RESERVE = 1024
-# Upper estimates of the tokens of a conversation: the descriptions of the tools, and the characters of a
-# token at worst (JSON numbers make short tokens)
-TOOL_TOKENS = 800
+# Upper estimates of the tokens of a conversation: the descriptions of the tools (994 tokens for Qwen3 8B),
+# and the characters of a token at worst (JSON numbers make short tokens)
+TOOL_TOKENS = 1000
 CHARS_PER_TOKEN = 2.5
 # How long Ollama keeps the model loaded after a question: loading it takes about 12 s
 KEEP_ALIVE = "30m"
@@ -72,6 +72,19 @@ HOUR_COLUMNS = """\
 time (local time, a TIMESTAMP: the hours of a day are WHERE time::DATE = 'YYYY-MM-DD', the hour is
 hour(time)), temperature_c, precipitation_mm, humidity_pct, cloud_cover_pct, sunshine_s (seconds of sun in
 the hour), wind_speed_kmh, wind_direction_deg, wind_gusts_kmh, weather_code (WMO), is_day, source"""
+MONTH_COLUMNS = """\
+year, month (1 to 12), day_count (its days in the period), temperature_max_c, temperature_mean_c,
+temperature_min_c (means of its days), precipitation_mm, sunshine_h (totals of the month), wet_days (days with at
+least 1 mm)"""
+# The months of the days, totalled by the code. Asked the mean precipitation of each month over 15 years, a model
+# summed all the days of each month, the totals of the 15 years together; the mean of the totals of `months` is
+# the query a model writes anyway.
+MONTHS = """\
+SELECT year(date) AS year, month(date) AS month, count(*) AS day_count, avg(temperature_max_c) AS temperature_max_c,
+    avg(temperature_mean_c) AS temperature_mean_c, avg(temperature_min_c) AS temperature_min_c,
+    sum(precipitation_mm) AS precipitation_mm, sum(sunshine_h) AS sunshine_h,
+    count(*) FILTER (precipitation_mm >= 1) AS wet_days
+FROM days GROUP BY ALL ORDER BY year, month"""
 
 # A number as written, not the hyphen of a date or a range: 2024-10-29 is 2024, 10 and 29
 NUMBER = re.compile(r"(?<![\d.,])[-−]?\d[\d.,]*")
@@ -94,9 +107,9 @@ Use the tools for every number:
 2. Let SQL compute every value of the answer, in one query when it can, as in these recipes:
    - a mean or a total over the period: SELECT AVG(temperature_mean_c), SUM(precipitation_mm) FROM days
    - values by year: SELECT year(date) AS year, AVG(temperature_mean_c) FROM days GROUP BY 1 ORDER BY 1
-   - each month of the year over several years, 12 rows: SELECT month(date) AS month, AVG(temperature_max_c)
-     AS high, SUM(precipitation_mm) / COUNT(DISTINCT year(date)) AS precipitation_mm FROM days GROUP BY 1
-     ORDER BY 1
+   - each month of the year over several years, 12 rows, from the totals of each month of each year:
+     SELECT month, AVG(temperature_max_c) AS high, AVG(precipitation_mm) AS precipitation_mm
+     FROM months GROUP BY 1 ORDER BY 1
    - the day of the highest value: SELECT arg_max(date, temperature_max_c) AS day, MAX(temperature_max_c)
      FROM days
    Never compute or estimate a number yourself, nor from some of the rows. LIMIT keeps the top rows of an
@@ -161,19 +174,20 @@ def find_place(name: str) -> str:
 
 
 def query_days(place: str, start: str, end: str, sql: str) -> str:
-    """Run a DuckDB SELECT on the daily weather of a place, the table `days`, from start to end.
-    The table holds that place only, without a place column, and has: {columns}.
+    """Run a DuckDB SELECT on the daily weather of a place from start to end, the table `days`, and on its
+    months, the view `months`. They hold that place only, without a place column. `days` has: {columns}.
+    `months` has a row for each month of each year: {months}.
 
     Args:
         place: The place: its name, e.g. "Milano", or its coordinates, e.g. "45.46, 9.19".
         start: The first day, YYYY-MM-DD, from 1940-01-01.
         end: The last day, YYYY-MM-DD, at most 31 years after start.
-        sql: A SELECT on the table `days` computing the values of the answer, at most 40 rows.
+        sql: A SELECT on `days` or `months` computing the values of the answer, at most 40 rows.
     """
     where = locate(place)
     first, last = period(start, end, MAX_DAYS)
     days = weather(where.latitude, where.longitude, first, last).daily
-    return run_sql(sql, "days", days, where)
+    return run_sql(sql, "days", days, where, views={"months": MONTHS})
 
 
 def query_hours(place: str, start: str, end: str, sql: str) -> str:
@@ -212,6 +226,7 @@ TOOLS: dict[str, Callable[..., str]] = {tool.__name__: tool for tool in (find_pl
 # The columns of the tables, in the descriptions of their tools: Ollama makes the tool schemas of the docstrings
 for tool, columns in [(query_days, DAY_COLUMNS), (query_hours, HOUR_COLUMNS)]:
     tool.__doc__ = (tool.__doc__ or "").replace("{columns}", columns.replace("\n", " "))
+query_days.__doc__ = (query_days.__doc__ or "").replace("{months}", MONTH_COLUMNS.replace("\n", " "))
 
 
 def period(start: str, end: str, max_days: int) -> tuple[date, date]:
@@ -223,11 +238,13 @@ def period(start: str, end: str, max_days: int) -> tuple[date, date]:
     return first, last
 
 
-def run_sql(sql: str, name: str, table: pd.DataFrame, place: places.Place | None = None) -> str:
+def run_sql(
+    sql: str, name: str, table: pd.DataFrame, place: places.Place | None = None, views: dict[str, str] | None = None
+) -> str:
     """
-    The result of a SELECT on a table as JSON rows, after the place of the table. DuckDB runs it in memory
-    without access to files or the network, so that a query can read the table only. A result of more than
-    MAX_ROWS rows or MAX_RESULT_CHARS characters is refused, for the query to aggregate it.
+    The result of a SELECT on a table, and on views of it, as JSON rows, after the place of the table. DuckDB
+    runs it in memory without access to files or the network, so that a query can read the table only. A result
+    of more than MAX_ROWS rows or MAX_RESULT_CHARS characters is refused, for the query to aggregate it.
     """
     if not sql.lstrip().lower().startswith(("select", "with")) or ";" in sql.rstrip().rstrip(";"):
         raise ValueError("only a single SELECT query is allowed")
@@ -238,6 +255,8 @@ def run_sql(sql: str, name: str, table: pd.DataFrame, place: places.Place | None
         )
     with duckdb.connect() as con:
         con.register(name, table)
+        for view, query in (views or {}).items():
+            con.execute(f"CREATE VIEW {view} AS {query}")  # computed only if the query reads it
         con.execute("SET enable_external_access = false")
         try:
             result = con.execute(sql.rstrip().rstrip(";")).df()

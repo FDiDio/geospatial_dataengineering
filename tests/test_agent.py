@@ -113,7 +113,9 @@ def test_run_sql_says_when_no_row_matches():
 
 def test_the_recipes_of_the_prompt_run_on_the_daily_weather(zurich):
     # Each SQL recipe the model is shown runs, and gives few rows
-    recipes = re.findall(r"(SELECT .*?FROM days(?: GROUP BY 1(?:\s+ORDER BY 1)?)?)", agent.system_prompt(), re.DOTALL)
+    recipes = re.findall(
+        r"(SELECT .*?FROM (?:days|months)(?: GROUP BY 1(?:\s+ORDER BY 1)?)?)", agent.system_prompt(), re.DOTALL
+    )
 
     for sql in recipes:
         result = json.loads(agent.query_days("Zurich", "2015-01-01", "2025-12-31", " ".join(sql.split())))
@@ -164,6 +166,21 @@ def test_query_days_takes_three_decades_in_a_query(zurich):
     result = json.loads(agent.query_days("Zurich", "1991-01-01", "2020-12-31", sql))
 
     assert result["rows"] == [{"days": 10958, "years": 30}]
+
+
+def test_query_days_gives_the_totals_of_each_month(zurich):
+    # 2 mm on the even days: 15 wet days and 30 mm in each January, 14 and 28 mm in each February, leap or not
+    sql = (
+        "SELECT month, AVG(precipitation_mm) AS rain, AVG(wet_days) AS wet, AVG(temperature_max_c) AS high, "
+        "SUM(day_count) AS days FROM months WHERE month <= 2 GROUP BY 1 ORDER BY 1"
+    )
+
+    result = json.loads(agent.query_days("Zurich", "2015-01-01", "2025-12-31", sql))
+
+    assert result["rows"] == [
+        {"month": 1, "rain": 30.0, "wet": 15.0, "high": 41.0, "days": 11 * 31},
+        {"month": 2, "rain": 28.0, "wet": 14.0, "high": 39.6, "days": 11 * 28 + 3},
+    ]
 
 
 def test_query_days_takes_coordinates_without_the_geocoder(monkeypatch):

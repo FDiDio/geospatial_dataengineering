@@ -120,9 +120,9 @@ def monthly_highs(lat: float, lon: float) -> list[float]:
     return daily.groupby(daily["date"].dt.month)["temperature_max_c"].mean().tolist()
 
 
-def monthly_rain(lat: float, lon: float) -> list[float]:
-    """The precipitation of each month of the year, the mean of its totals of 2015 to 2025."""
-    daily = days(lat, lon, "2015-01-01", "2025-12-31")
+def monthly_rain(lat: float, lon: float, start: str = "2015-01-01", end: str = "2025-12-31") -> list[float]:
+    """The precipitation of each month of the year, the mean of its totals of the years from start to end."""
+    daily = days(lat, lon, start, end)
     totals = daily.groupby([daily["date"].dt.year, daily["date"].dt.month])["precipitation_mm"].sum()
     return totals.groupby(level=1).mean().tolist()
 
@@ -176,6 +176,10 @@ CASES = [
          "al 2025?", "Lugano", monthly_highs),
     Case("lugano_monthly_rain", "Quanta pioggia cade in media a Lugano in ciascun mese dell'anno, secondo i dati dal "
          "2015 al 2025?", "Lugano", monthly_rain, "total"),
+    # The precipitation asked beside means of the days: a model summed the days of the 15 years of each month
+    Case("lugano_monthly_table", "Lugano negli ultimi 15 anni, dal 2011 al 2025: massime medie, minime medie e "
+         "precipitazioni medie, in una tabella mese per mese", "Lugano",
+         lambda lat, lon: monthly_rain(lat, lon, "2011-01-01", "2025-12-31"), "total"),
 ]  # fmt: skip
 
 
