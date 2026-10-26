@@ -7,6 +7,8 @@ venv/
 
 # Pipeline outputs
 output/
+# ERA5 days the agent evaluation keeps on disk between its runs
+benchmarks/.cache/
 *.parquet
 .*.tmp
 

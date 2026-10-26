@@ -1,0 +1,27 @@
+# Theme of the dashboard (src/dashboard/app.py): Streamlit reads it from the working directory
+[theme]
+# Space Grotesk for the headings and the numbers, DM Sans for the text, JetBrains Mono for the coordinates
+headingFont = "'Space Grotesk':https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap"
+font = "'DM Sans':https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+baseRadius = "0.75rem"
+buttonRadius = "full"
+metricValueFontSize = "1.75rem"
+metricValueFontWeight = 600
+headingFontWeights = [700, 650, 600, 600, 600, 600]
+showWidgetBorder = true
+showSidebarBorder = true
+
+[theme.light]
+primaryColor = "#2a78d6"
+backgroundColor = "#fbfbfa"
+secondaryBackgroundColor = "#f1f3f6"
+textColor = "#1c2430"
+borderColor = "#e3e7ec"
+
+[theme.dark]
+primaryColor = "#3987e5"
+backgroundColor = "#0f1318"
+secondaryBackgroundColor = "#181e26"
+textColor = "#e6e9ee"
+borderColor = "#2a323d"

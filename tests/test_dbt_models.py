@@ -8,12 +8,12 @@ import h3
 import numpy as np
 import pandas as pd
 import pytest
-from conftest import make_era5_df, to_data_array
+from conftest import fake_archive_fetch, make_era5_df, to_data_array
 from dbt.adapters.duckdb.connections import DuckDBConnectionManager
 from dbt.cli.main import dbtRunner
 from streamlit.testing.v1 import AppTest
 
-from dashboard import queries
+from dashboard import archive, places, queries, terrain
 from utils.data_writer import ParquetSink
 from utils.h3_processor import H3Enricher
 from utils.iceberg_sink import IcebergSink, local_catalog_properties
@@ -152,7 +152,13 @@ def test_dashboard_layers(built):
         regions = queries.layer_values(con, heatwave_day, "temperature_mean_c")
         assert set(regions["h3"]) == {h3.cell_to_parent(cell, 3) for cell in CELLS}
         cells = queries.layer_values(con, heatwave_day, "temperature_anomaly_c", queries.REGIONS["Alps"])
-        assert set(cells["h3"]) == CELLS and (cells["value"] > 10).all()
+        assert set(cells["h3"]) == {h3.cell_to_parent(cell, queries.ZOOM_RESOLUTION) for cell in CELLS}
+        # Larger hexagons chosen around a place: the cells are rolled up to them, finer ones stop at ZOOM_RESOLUTION
+        coarse = queries.layer_values(con, heatwave_day, "temperature_anomaly_c", queries.REGIONS["Alps"], 3)
+        assert set(coarse["h3"]) == {h3.cell_to_parent(cell, 3) for cell in CELLS}
+        fine = queries.layer_values(con, heatwave_day, "temperature_anomaly_c", queries.REGIONS["Alps"], 7)
+        assert set(fine["h3"]) == set(cells["h3"])
+        assert (cells["value"] > 10).all()
         kpis = queries.headline(con, heatwave_day)
         assert kpis["heatwave_cells"] == len(CELLS)
         assert kpis["hottest_c"] == pytest.approx(32.3, abs=1e-3)
@@ -160,6 +166,9 @@ def test_dashboard_layers(built):
 
 def test_dashboard_renders(built, monkeypatch):
     monkeypatch.setenv("DUCKDB_PATH", built["DUCKDB_PATH"])
+    monkeypatch.setattr(places, "search", lambda query, language: [places.Place("Zürich, Schweiz", 47.37, 8.54)])
+    monkeypatch.setattr(archive, "fetch", fake_archive_fetch)
+    monkeypatch.setattr(terrain, "cell_altitude", lambda cell: terrain.Altitude(412.0, 390.0, 870.0, 49))
     app = AppTest.from_file(os.path.join(os.path.dirname(__file__), "..", "src", "dashboard", "app.py"))
     app.run(timeout=60)
 
@@ -167,6 +176,24 @@ def test_dashboard_renders(built, monkeypatch):
     assert [metric.label for metric in app.metric][:2] == ["Global mean temperature", "Hottest cell"]
     app.sidebar.radio[0].set_value("heatwave_excess_c").run(timeout=60)
     assert not app.exception
+    app.sidebar.text_input[0].set_value("Zurich").run(timeout=60)
+    assert not app.exception
+    assert app.subheader[0].value == "Zürich"
+    assert [tab.label.split(": ", 1)[-1] for tab in app.tabs] == [
+        "Month · May 2022",
+        "Year · 2022",
+        "Day · 31 May 2022",
+    ]
+    assert len(app.dataframe) == 4  # the days of the month, the months of the year, the hours and the data of the map
+    # A day out of the warehouse: the weather of the place, no map
+    app.sidebar.date_input[0].set_value(date(2022, 7, 15)).run(timeout=60)
+    assert not app.exception
+    assert any("ingested days only" in caption.value for caption in app.caption)
+    assert [tab.label.split(": ", 1)[-1] for tab in app.tabs] == [
+        "Month · July 2022",
+        "Year · 2022",
+        "Day · 15 Jul 2022",
+    ]
 
 
 def test_incremental_run_rebuilds_only_the_selected_days(built, monkeypatch, tmp_path):

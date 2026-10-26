@@ -44,6 +44,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-default-groups --group orchestration --group dashboard
 
 COPY transform/ transform/
+# The theme of the dashboard
+COPY .streamlit/ .streamlit/
 # HOME holds the DuckDB extensions installed below, also when the container runs with another uid
 ENV DAGSTER_HOME=/app/dagster_home \
     HOME=/home/pipeline
