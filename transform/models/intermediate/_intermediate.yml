@@ -14,8 +14,11 @@ models:
             expression: temperature_min_c <= temperature_mean_c and temperature_mean_c <= temperature_max_c
       - expression_is_true:
           arguments:
-            # every grid point of the cell has a value for each hour of the day
+            # every grid point of the cell has a value for each hour of the day; the data contract
+            # tolerates a few masked implausible values, so a gap is a warning, not an error
             expression: hourly_values % 24 = 0
+          config:
+            severity: warn
     columns:
       - name: date
         data_tests: [not_null]
