@@ -18,6 +18,17 @@ logger = logging.getLogger(__name__)
 DEFAULT_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config", "config.yaml")
 
 
+def positive_int(text):
+    """An argparse type: an integer of at least 1, as a number of workers."""
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid int value: {text!r}") from None
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, not {value}")
+    return value
+
+
 def parse_arguments(argv=None):
     parser = argparse.ArgumentParser(description="Process ERA5 data from GCS.")
     parser.add_argument(
@@ -41,7 +52,9 @@ def parse_arguments(argv=None):
         help="Variables to process (default: the variables listed in the configuration file)",
     )
     parser.add_argument(
-        "--workers", type=int, help="Variable-days processed in parallel (default: 'workers' of the configuration)"
+        "--workers",
+        type=positive_int,
+        help="Variable-days processed in parallel (default: 'workers' of the configuration)",
     )
     parser.add_argument("--source", choices=SOURCES, help="Read the daily NetCDF files or the Zarr store")
     parser.add_argument("--sink", choices=SINKS, help="Write Hive-partitioned Parquet files or Iceberg tables")

@@ -153,3 +153,10 @@ def test_iceberg_sink_end_to_end(tmp_path, use_source):
 def test_legacy_config_file_argument_is_accepted():
     args = main_script.parse_arguments(["--config_file", "custom.yaml"])
     assert args.config == "custom.yaml"
+
+
+@pytest.mark.parametrize("workers", ["0", "-2", "two"])
+def test_workers_argument_must_be_a_positive_integer(workers, capsys):
+    with pytest.raises(SystemExit):
+        main_script.parse_arguments(["--workers", workers])
+    assert "--workers" in capsys.readouterr().err
