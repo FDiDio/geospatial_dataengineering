@@ -253,8 +253,8 @@ ingestion steps; copy it into `$DAGSTER_HOME`.
 
 ## Dashboard
 
-The dashboard, [src/dashboard/app.py](src/dashboard/app.py), has two pages: the **Explorer** and **Ask the weather**,
-the [agent](#weather-agent). The Explorer, [explorer.py](src/dashboard/explorer.py), maps the marts on H3 hexagons:
+The dashboard, [src/dashboard/app.py](src/dashboard/app.py), has two pages: **Weather**, the explorer, and **Ask the
+weather**, the [agent](#weather-agent). The explorer, [explorer.py](src/dashboard/explorer.py), maps the marts on H3 hexagons:
 mean and maximum temperature, precipitation,
 temperature anomalies, heatwaves and extreme precipitation, on the world regions or on the cells of an area, with the
 daily KPIs and the global mean temperature over time. It reads the warehouse through short-lived read-only connections,
@@ -275,13 +275,16 @@ where it blows, in local time. Its H3 cell (resolution
 where a first click zooms in, and around a place 20 km by default, or from 138 to 2.8 km (resolutions 3 to 7) with the
 **Hexagons** control, which also sizes the cell of the place and its altitude (its weather stays the 28 km ERA5 grid).
 The **Zoom out / Zoom in / Recenter** buttons replace the zoom buttons of the map, whose clicks would fall through to
-the hexagons under them. The theme is in [.streamlit/config.toml](.streamlit/config.toml). It comes on demand from the ERA5 archive of
+the hexagons under them. The theme is in [.streamlit/config.toml](.streamlit/config.toml). On phones, narrower than 640 px, the map is shorter,
+as a finger dragging on it moves the map and not the page, the tiles come two a row, and a line says where the search
+is, the sidebar starting closed. The page speaks plainly: the models are named in the credits only. It comes on demand from the ERA5 archive of
 [Open-Meteo](https://open-meteo.com) (`models=era5`, the 0.25° grid of the pipeline; free for non-commercial use,
 CC BY 4.0): Open-Meteo stores ERA5 as time series, so a month of a place takes one small request, where the ARCO-ERA5
 Zarr store holds one global field per hour. ERA5 comes about five days behind real time: the days it has not
 published yet, and the **forecast of the next two weeks**, come from the operational model of the same centre,
 ECMWF IFS (9 km, `models=ecmwf_ifs` of the Open-Meteo forecast API), ERA5 winning where both have a day or an hour.
-Every day and hour carries its source (ERA5, ECMWF IFS or Forecast), shown in the tables, a badge and lighter bars;
+Every day and hour carries its source (ERA5, ECMWF IFS or Forecast), shown as Historical, Recent or Forecast in the
+tables, a badge and lighter bars;
 the statistics of a month or a year leave the forecast out. Both need internet access. The map shows the ingested days only, zoomed on
 the place when one is searched. Zoomed-in maps are drawn on resolution 4 cells: the 0.25° grid is sparser
 than the resolution 5 cells, half of which hold no grid point at mid latitudes.
@@ -296,7 +299,7 @@ uv run streamlit run src/dashboard/app.py   # DUCKDB_PATH selects the warehouse 
 such as *"Quanti giorni sopra 30 °C ha avuto Milano nel luglio 2022?"*, with an open model served by
 [Ollama](https://ollama.com) on the laptop GPU: by default **Qwen3 8B** (Apache 2.0, 5.2 GB at 4 bits), which calls
 tools reliably and fits in 8 GB of GPU memory with an 8,192-token context. The model never does the arithmetic: it
-picks the tools and writes SQL, and the tools compute every number from the same sources as the Explorer.
+picks the tools and writes SQL, and the tools compute every number from the same sources as the explorer.
 
 | Tool | What it does |
 |---|---|

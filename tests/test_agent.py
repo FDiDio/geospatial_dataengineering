@@ -531,7 +531,7 @@ def test_dashboard_has_a_page_to_ask_the_weather(monkeypatch, tmp_path):
     app = AppTest.from_file(APP)
     app.run(timeout=60)
 
-    assert app.title[0].value == "ERA5 weather explorer"
+    assert app.title[0].value == "Weather anywhere"
 
     app.switch_page("ask.py").run(timeout=60)
 
@@ -618,7 +618,7 @@ def test_ask_page_says_when_ollama_cloud_does_not_answer(monkeypatch):
     app = ask_page(monkeypatch, models=None)
 
     assert not app.exception
-    assert app.caption[0].value.startswith("An open model served by Ollama Cloud")
+    assert app.caption[0].value.startswith("An open AI model answers") and "computer" not in app.caption[0].value
     assert app.error[0].value == "Ollama Cloud does not answer: Failed to connect to Ollama" and not app.chat_input
 
 

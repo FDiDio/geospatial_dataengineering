@@ -476,8 +476,8 @@ def test_dashboard_shows_a_place_without_a_warehouse(monkeypatch, tmp_path):
     assert (day["High"], day["Low"], day["Precipitation"]) == ("40.0 °C", "30.0 °C", "0.0 mm")
     altitude = next(metric for metric in app.metric if metric.label == "Mean altitude")
     assert (altitude.value, altitude.delta) == ("412 m", "390–870 m")
-    zurich_cell = h3.latlng_to_cell(47.37, 8.54, 7)  # the finest hexagon by default, 2.8 km
-    assert any(f":material/hexagon: H3 {zurich_cell}" in markdown.value for markdown in app.markdown)
+    # The finest hexagon by default, 2.8 km across
+    assert any(":material/hexagon: 5 km² hexagon" in markdown.value for markdown in app.markdown)
     month_tab, year_tab, _ = app.tabs
     assert [tab.label.split(": ", 1)[-1] for tab in app.tabs] == [
         "Month · July 2022",
@@ -522,7 +522,7 @@ def test_a_place_typed_or_clicked_as_coordinates(monkeypatch, tmp_path):
     assert not app.exception
     assert app.subheader[0].value == "47.3700, 8.5400"
     assert "Near Zürich, Schweiz" in [caption.value for caption in app.caption]
-    assert any("grid point, 47.25° 8.50°" in caption.value for caption in app.caption)
+    assert any("weather model, 47.25° 8.50°" in caption.value for caption in app.caption)
 
     # A click on the map writes the center of the clicked hexagon in the place field
     clicks.append((45.46, 9.19))
@@ -574,8 +574,9 @@ def test_the_past_shows_when_the_forecast_fails(monkeypatch, tmp_path):
     app.sidebar.date_input[0].set_value(archive.last_complete_day()).run(timeout=60)
 
     assert not app.exception
-    assert "Part of the weather is missing" in app.warning[0].value and "ECMWF IFS" in app.warning[0].value
-    assert any("ERA5 reanalysis" in markdown.value for markdown in app.markdown)
+    warning = app.warning[0].value
+    assert "Part of the weather is missing" in warning and "recent data and forecast: " in warning
+    assert any("Historical data" in markdown.value for markdown in app.markdown)
     assert "High" in metrics(app.main)
 
 
@@ -584,9 +585,9 @@ def test_today_is_a_forecast_left_out_of_the_statistics(monkeypatch, tmp_path):
     app.sidebar.text_input[0].set_value("Zurich").run(timeout=60)  # on today, the default day
 
     assert not app.exception
-    assert any("Forecast · ECMWF IFS" in markdown.value for markdown in app.markdown)
+    assert any(":material/online_prediction: Forecast]" in markdown.value for markdown in app.markdown)
     days = app.dataframe[0].value
-    assert "Forecast" in set(days["Source"]) and set(days["Source"]) <= set(archive.SOURCES)
+    assert "Forecast" in set(days["Source"]) and set(days["Source"]) <= {"Historical", "Recent", "Forecast"}
     gone_by = int((days["Source"] != "Forecast").sum())
     if gone_by:
         assert metrics(app.tabs[0])["Wet days"].endswith(f"of {gone_by}")
@@ -598,8 +599,7 @@ def test_zoom_buttons_and_hexagon_sizes(monkeypatch, tmp_path):
     # Hexagons of 2.8 km by default: the place gets its resolution 7 cell, zoomed in to keep them easy to click
     fine = 7.5 + 2 * math.log2(math.sqrt(7))
     assert app.session_state["zoom"] == pytest.approx(fine)
-    cell = h3.latlng_to_cell(47.37, 8.54, 7)
-    assert any(f":material/hexagon: H3 {cell} · 5 km²" in markdown.value for markdown in app.markdown)
+    assert any(":material/hexagon: 5 km² hexagon" in markdown.value for markdown in app.markdown)
 
     def press(label):
         next(button for button in app.button if button.label == label).click().run(timeout=60)
@@ -613,8 +613,7 @@ def test_zoom_buttons_and_hexagon_sizes(monkeypatch, tmp_path):
     # Hexagons of 20 km: the resolution 5 cell, and the map zooms out to keep them as large
     app.button_group[0].set_value(5).run(timeout=60)
     assert not app.exception
-    cell = h3.latlng_to_cell(47.37, 8.54, 5)
-    assert any(f":material/hexagon: H3 {cell} · 242 km²" in markdown.value for markdown in app.markdown)
+    assert any(":material/hexagon: 242 km² hexagon" in markdown.value for markdown in app.markdown)
     assert app.session_state["zoom"] == pytest.approx(7.5)
 
 
@@ -631,7 +630,7 @@ def test_the_chosen_place_stays_when_the_day_changes(monkeypatch, tmp_path):
 
     assert not app.exception
     assert app.sidebar.selectbox[0].value == city
-    assert any("grid point, 40.75° -74.00°" in caption.value for caption in app.caption)
+    assert any("weather model, 40.75° -74.00°" in caption.value for caption in app.caption)
 
 
 def test_a_day_published_up_to_the_evening_has_no_daily_values(monkeypatch, tmp_path):

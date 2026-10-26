@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dashboard import archive, places, queries, terrain
 from dashboard.queries import DEFAULT_WAREHOUSE, LAYERS, REGIONS, colorize, scale_colors
 
-WORLD = "World (H3 regions, ~12,000 km²)"
+WORLD = "World"
 SERIES_COLOR = {"light": "#2a78d6", "dark": "#3987e5"}
 # The second series of a chart, the gusts beside the wind: orange against the blue, dashed besides
 GUST_COLOR = {"light": "#c4501f", "dark": "#f08a5f"}
@@ -109,7 +109,7 @@ def load_weather(latitude: float, longitude: float, year: int) -> tuple[archive.
         try:
             weathers[source.name] = loader(latitude, longitude, period, tuple(archive.HOURLY))
         except (OSError, ValueError) as error:
-            errors.append(f"{source.name}: {error}")
+            errors.append(f"{'historical data' if source == archive.ERA5 else 'recent data and forecast'}: {error}")
     if not weathers:
         return None, errors
     return archive.combine(weathers.get(archive.ERA5.name), weathers.get(archive.IFS.name), now), errors
@@ -262,14 +262,16 @@ def show_period_charts(
     st.altair_chart(styled(sunshine + marker, 160, titles[3]), width="stretch")
 
 
+# The sources of the weather as the page names them, in plain words: the models are named in the credits
+SOURCE_NAMES = {archive.ERA5.name: "Historical", archive.IFS.name: "Recent", archive.FORECAST: "Forecast"}
 SOURCE_BADGES = {
-    archive.ERA5.name: ":green-badge[:material/verified: ERA5 reanalysis]",
-    archive.IFS.name: ":blue-badge[:material/update: ECMWF IFS · not in ERA5 yet]",
-    archive.FORECAST: ":orange-badge[:material/online_prediction: Forecast · ECMWF IFS]",
+    archive.ERA5.name: ":green-badge[:material/verified: Historical data]",
+    archive.IFS.name: ":blue-badge[:material/update: Recent data, not final yet]",
+    archive.FORECAST: ":orange-badge[:material/online_prediction: Forecast]",
 }
 # The sources of the days in the charts: the same hue, lighter for the last days and lighter still for the
 # forecast. Vega-Lite spreads an opacity over the sources evenly between the two ends of its range.
-SOURCE_OPACITY = alt.Scale(domain=archive.SOURCES, range=[1.0, 0.3])
+SOURCE_OPACITY = alt.Scale(domain=list(SOURCE_NAMES.values()), range=[1.0, 0.3])
 
 
 def by_source(data: pd.DataFrame, legend: bool) -> dict:
@@ -310,7 +312,7 @@ if clicked is not None:
     st.session_state["map_clicks"] = clicks = clicks + 1
 
 with st.sidebar:
-    st.header(":material/public: ERA5 weather")
+    st.header(":material/public: Weather")
     place = None
     place_query = st.text_input(
         "Place",
@@ -358,10 +360,14 @@ with st.sidebar:
         "Open-Meteo · Altitude: Copernicus DEM 90 m · Places: © OpenStreetMap contributors"
     )
 
-st.title("ERA5 weather explorer")
+st.title("Weather anywhere")
 st.caption(
-    "Search a place, type its coordinates or click a hexagon of the map: its weather on any day since 1940, "
-    "and its forecast for the next two weeks."
+    "Search a place or click the map: the weather of any day since 1940, and the forecast for the next two weeks."
+)
+# On phones the sidebar, with the search, starts closed behind the » at the top left (app.py shows this there only)
+st.html(
+    '<div class="phone-only" style="font-size: 0.9rem; font-weight: 600">'
+    "Tap » at the top left to search a place and choose the day.</div>"
 )
 
 on_map = day in dates
@@ -512,7 +518,7 @@ with st.container(horizontal=True, vertical_alignment="bottom", gap="medium"):
         key="hexagons",
         disabled=place is None,
         help="Size of the hexagon of a place and of the clickable ones around it, from corner to corner. "
-        "The altitude is of the hexagon; the weather comes from the 28 km (0.25°) grid of ERA5 whatever the size.",
+        "The altitude is of the hexagon; the weather comes from a grid of 28 km whatever the size.",
     )
     with st.container(horizontal=True, width="content"):
         st.button("Zoom out", icon=":material/zoom_out:", on_click=zoom_by, args=(-1.0,))
@@ -600,7 +606,7 @@ if place is not None and cell is not None:
             month = None if month_past.empty else archive.summary(month_past)
             today = None if selected.empty else selected.iloc[0]
 
-        badges = [f":gray-badge[:material/hexagon: H3 {cell} · {h3.cell_area(cell, 'km^2'):,.0f} km²]"]
+        badges = [f":gray-badge[:material/hexagon: {h3.cell_area(cell, 'km^2'):,.0f} km² hexagon]"]
         if weather is not None:
             badges.append(f":gray-badge[:material/schedule: {weather.timezone}]")
         if today is not None:
@@ -678,8 +684,8 @@ if place is not None and cell is not None:
             model = archive.IFS.name if model == archive.FORECAST else model
             lat, lon, elevation = weather.points.get(model, (weather.latitude, weather.longitude, weather.elevation))
             st.caption(
-                f"{day:%A %d %B %Y}, local time ({weather.timezone}). Values of the nearest {model} grid point, "
-                f"{lat:.2f}° {lon:.2f}°, {elevation:.0f} m above sea level."
+                f"{day:%A %d %B %Y}, local time ({weather.timezone}). Values of the nearest point of the weather "
+                f"model, {lat:.2f}° {lon:.2f}°, {elevation:.0f} m above sea level."
             )
 
     if weather is not None:
@@ -707,6 +713,7 @@ if place is not None and cell is not None:
                     direction=month_days["wind_direction_deg"].map(archive.compass),
                     icon=[icon for icon, _ in skies],
                     sky=[f"{icon} {label}" for icon, label in skies],
+                    source=month_days["source"].map(SOURCE_NAMES),
                 )
                 show_period_charts(
                     month_days,
@@ -782,7 +789,9 @@ if place is not None and cell is not None:
                 )
                 counts = month_days["source"].value_counts()
                 st.caption(
-                    " · ".join(f"{counts[source]} days of {source}" for source in archive.SOURCES if source in counts)
+                    " · ".join(
+                        f"{counts[name]} {name.lower()} days" for name in SOURCE_NAMES.values() if name in counts
+                    )
                     + (f" · {days_in_month - len(month_days)} days to come" if len(month_days) < days_in_month else "")
                     + ". The statistics leave the forecast out."
                 )
@@ -864,6 +873,7 @@ if place is not None and cell is not None:
                 icon=[icon for icon, _ in skies],
                 sky=[f"{icon} {label}" for icon, label in skies],
                 sunshine_min=published["sunshine_s"] / 60,
+                source=published["source"].map(SOURCE_NAMES),
             )
             repeated = hours["hour"].duplicated(keep=False)
             hours.loc[repeated, "hour"] = hours.loc[repeated, "label"]

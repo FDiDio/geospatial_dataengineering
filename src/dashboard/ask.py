@@ -116,9 +116,9 @@ def eval_score(model: str, think: bool) -> str | None:
 
 st.title("Ask the weather")
 st.caption(
-    f"An open model {'served by Ollama Cloud' if agent.CLOUD else 'running on this computer with Ollama'} finds the "
-    "place and writes SQL on the data of the explorer: ERA5 since 1940, then ECMWF IFS and its forecast. Every "
-    "number comes from a query: open **How I got it** to check them."
+    f"An open AI model{'' if agent.CLOUD else ', on this computer,'} answers questions about the weather of any "
+    "place, from 1940 to the next two weeks. It looks every number up in the weather data: open **How I got it** "
+    "to see how."
 )
 
 try:
@@ -163,7 +163,7 @@ for message in chat:
             st.markdown(message["content"])
 
 if not chat and not question:
-    with st.container(horizontal=True, gap="small"):
+    with st.container(horizontal=True, gap="small", key="examples"):
         for example in EXAMPLES:
             st.button(example, on_click=st.session_state.update, kwargs={"example": example})
 
