@@ -1,14 +1,15 @@
 # Theme of the dashboard (src/dashboard/app.py): Streamlit reads it from the working directory
 [theme]
-# Space Grotesk for the headings and the numbers, DM Sans for the text, JetBrains Mono for the coordinates
-headingFont = "'Space Grotesk':https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap"
-font = "'DM Sans':https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap"
-codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+# A technical look, of instrument panels and terminals: Chakra Petch for the headings, IBM Plex Sans for the text,
+# JetBrains Mono for the code, the coordinates and the values of the metrics (set in app.py)
+headingFont = "'Chakra Petch':https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&display=swap"
+font = "'IBM Plex Sans':https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap"
 baseRadius = "0.75rem"
 buttonRadius = "full"
-metricValueFontSize = "1.75rem"
+metricValueFontSize = "1.6rem"
 metricValueFontWeight = 600
-headingFontWeights = [700, 650, 600, 600, 600, 600]
+headingFontWeights = [700, 700, 600, 600, 600, 600]
 showWidgetBorder = true
 showSidebarBorder = true
 
