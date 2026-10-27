@@ -5,13 +5,22 @@ about it in plain language.
     uv run streamlit run src/dashboard/app.py
 """
 
+import os
+import sys
+
 import streamlit as st
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from dashboard import phone
 
 # On phones, narrower than 640 px (the map is shorter there, explorer.py). Two tiles a row, with smaller numbers,
 # their labels wrapped rather than cut short. The hexagon sizes and the example questions fit the width. The line
-# on where the search is shows on phones only, where the sidebar closes once a place is chosen.
+# on where the search is shows on phones only, where the sidebar starts closed. The card of the place, where the
+# button of the map's popup scrolls, clears the header of the page.
 PHONE_CSS = """
 [data-testid="stElementContainer"]:has(.phone-only) {display: none}
+.st-key-place {scroll-margin-top: 4.5rem}
 @media (max-width: 640px) {
   [data-testid="stElementContainer"]:has(.phone-only) {display: block}
   [data-testid="stMainBlockContainer"] {padding-top: 4rem}
@@ -31,8 +40,13 @@ PHONE_CSS = """
 }
 """
 
-# The sidebar, with the search, open on phones too: closed, people missed it
-st.set_page_config(page_title="Weather anywhere", page_icon="🌍", layout="wide", initial_sidebar_state="expanded")
+# The sidebar, with the search, open on a computer; on a phone it would cover the page, and starts closed behind »
+st.set_page_config(
+    page_title="Weather anywhere",
+    page_icon="🌍",
+    layout="wide",
+    initial_sidebar_state="collapsed" if phone.is_phone() else "expanded",
+)
 # The values of the metrics in the code font of the theme, with digits of one width, as on an instrument panel
 st.html(
     "<style>[data-testid='stMetricValue'] {font-family: 'JetBrains Mono', monospace; letter-spacing: -0.03em;"

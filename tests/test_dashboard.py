@@ -355,13 +355,30 @@ def test_reverse_geocoding_names_the_point_or_nothing_at_sea(monkeypatch):
 def test_the_data_of_the_map():
     cell = h3.latlng_to_cell(47.37, 8.54, 7)
     values = [{"h3": h3.latlng_to_cell(47.0, 8.0, 4), "color": [227, 73, 72, 220], "text": "31.2 °C"}]
+    popup = ("Zürich", ["Fri 15 Jul 2022", "☀️ Clear sky"])
     data = maps.data(
-        "dark", [220, 225, 235, 40], [57, 135, 229], ((47.37, 8.54), 9.5), 3, 380, True, (47.37, 8.54, cell), values
+        "dark",
+        [220, 225, 235, 40],
+        [57, 135, 229],
+        ((47.37, 8.54), 9.5),
+        3,
+        380,
+        True,
+        (47.37, 8.54, cell),
+        values,
+        popup,
     )
 
     assert data["style"].endswith("dark-matter-gl-style/style.json")
+    assert data["dark"] is True
     assert data["view"] == {"lat": 47.37, "lng": 8.54, "zoom": 9.5, "id": 3}
-    assert data["place"] == {"lat": 47.37, "lng": 8.54, "cell": cell}
+    assert data["place"] == {
+        "lat": 47.37,
+        "lng": 8.54,
+        "cell": cell,
+        "title": "Zürich",
+        "lines": ["Fri 15 Jul 2022", "☀️ Clear sky"],
+    }
     assert (data["height"], data["phone"], data["values"]) == (380, True, values)
     assert json.loads(json.dumps(data)) == data  # what the browser gets
     assert maps.data("light", [0, 0, 0, 40], [0, 0, 0], maps.WORLD_VIEW, 1, 580, False)["place"] is None
@@ -378,6 +395,9 @@ def test_the_script_of_the_map():
     assert 'setTriggerValue("click", { lat: point.lat, lng: point.lng, resolution: state.resolution })' in script
     assert "cooperativeGestures: data.phone" in script
     assert "Math.min(16, 3 + 1.2 * zoom)" in script
+    # The popup of the place: text only, never HTML from a name; its button scrolls to the card of the place
+    assert "innerHTML" not in script and "setHTML" not in script
+    assert 'document.querySelector(".st-key-place")' in script
 
 
 def test_the_zoom_of_a_hexagon_size():

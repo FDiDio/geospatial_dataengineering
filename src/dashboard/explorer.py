@@ -178,6 +178,26 @@ def recenter() -> None:
     st.session_state["recenter"] = True
 
 
+def popup(
+    place: places.Place, near: str | None, weather: archive.Weather | None, today: pd.Series | None, day: date
+) -> tuple[str, list[str]]:
+    """The title and lines of the popup of the place on the map: its name, the day, its sky and its main values."""
+    title = near.split(",")[0] if near else place.short_name
+    lines = [f"{day:%a %d %b %Y}"]
+    if weather is None:
+        lines.append("Weather unavailable, try again in a moment")
+    elif today is None:
+        lines.append("This day is not complete yet")
+    else:
+        icon, label = archive.sky(today["weather_code"])
+        lines += [
+            f"{icon} {label}",
+            f"High {measure(today['temperature_max_c'], '°C')} · Low {measure(today['temperature_min_c'], '°C')}",
+            f"Precipitation {measure(today['precipitation_mm'], 'mm')}",
+        ]
+    return title, lines
+
+
 def show_statistics(statistics: pd.Series) -> None:
     """The averages, extremes and totals of a period, as tiles."""
     with st.container(horizontal=True):
@@ -407,6 +427,29 @@ if (place, bbox, resolution) != st.session_state.get("viewed") or recentered:
         st.session_state["views"] = st.session_state.get("views", 0) + 1
         st.session_state["view"] = view
 
+# The weather of the place, before the map: its popup sums it up
+weather: archive.Weather | None = None
+weather_errors: list[str] = []
+today = None
+near = None
+if place is not None and cell is not None:
+    weather, weather_errors = load_weather(place.latitude, place.longitude, day.year)
+    if place.kind == "coordinates":
+        try:
+            near = name_of(place.latitude, place.longitude, language)
+        except (OSError, ValueError):
+            near = None
+    if weather is not None:
+        daily, hourly = weather.daily, weather.hourly
+        # The statistics of the month and the year are of the days gone by: the forecast is left out
+        past = daily[daily["source"] != archive.FORECAST]
+        selected = daily[daily["date"].dt.date == day]
+        published = hourly[hourly["time"].dt.date == day]
+        month_days = daily[daily["date"].dt.month == day.month]
+        month_past = past[past["date"].dt.month == day.month]
+        month = None if month_past.empty else archive.summary(month_past)
+        today = None if selected.empty else selected.iloc[0]
+
 with st.container(horizontal=True, vertical_alignment="bottom", gap="medium"):
     st.segmented_control(
         "Hexagons",
@@ -441,6 +484,7 @@ maps.show(
         on_phone,
         place=None if place is None or cell is None else (place.latitude, place.longitude, cell),
         values=cells,
+        popup=popup(place, near, weather, today, day) if place is not None else ("", ()),
     ),
     key="map",
     on_click=take_click,
@@ -471,20 +515,16 @@ if on_map:
         st.caption("No cell is affected on this day.")
 
 if place is not None and cell is not None:
-    weather, weather_errors = load_weather(place.latitude, place.longitude, day.year)
     altitude: terrain.Altitude | None
     try:
         altitude = cell_altitude(cell)
     except (OSError, ValueError, KeyError):
         altitude = None
 
-    with st.container(border=True):
+    # Keyed: the button of the map's popup scrolls here
+    with st.container(border=True, key="place"):
         st.subheader(place.short_name)
         if place.kind == "coordinates":
-            try:
-                near = name_of(place.latitude, place.longitude, language)
-            except (OSError, ValueError):
-                near = None
             st.caption(f"Near {near}" if near else "No named place here.")
         else:
             st.caption(place.name)
@@ -493,17 +533,6 @@ if place is not None and cell is not None:
         with st.container(horizontal=True, vertical_alignment="center"):
             st.code(f"{place.latitude:.6f}, {place.longitude:.6f}", language=None, width="content")
             st.markdown(f":blue-badge[:material/location_on: {places.format_dms(place.latitude, place.longitude)}]")
-        today = None
-        if weather is not None:
-            daily, hourly = weather.daily, weather.hourly
-            # The statistics of the month and the year are of the days gone by: the forecast is left out
-            past = daily[daily["source"] != archive.FORECAST]
-            selected = daily[daily["date"].dt.date == day]
-            published = hourly[hourly["time"].dt.date == day]
-            month_days = daily[daily["date"].dt.month == day.month]
-            month_past = past[past["date"].dt.month == day.month]
-            month = None if month_past.empty else archive.summary(month_past)
-            today = None if selected.empty else selected.iloc[0]
 
         badges = [f":gray-badge[:material/hexagon: {h3.cell_area(cell, 'km^2'):,.0f} km² hexagon]"]
         if weather is not None:

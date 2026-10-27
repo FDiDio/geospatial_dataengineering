@@ -2,7 +2,8 @@
 // deck.gl the hexagons over it. The browser covers the whole view with hexagons at each move, smaller on the world and
 // larger as the map zooms in, and lights the one under the pointer. A click sends its point and the resolution of its
 // hexagon to Python. The map lives as long as the page: each run of the script gives it new data, which changes its
-// layers, and it moves only when Python gives it a new view.
+// layers, and it moves only when Python gives it a new view. A popup on the place sums up its weather, with a button
+// down to the card of the place below the map.
 
 // h3-js before deck.gl, whose bundle takes the h3 of the page for its H3 layers
 const LIBRARIES = [
@@ -132,6 +133,40 @@ function layers(state) {
   return drawn;
 }
 
+// The popup of the place: a title, lines of text and, once its weather is in, a button down to the card of the place
+function popupContent(data, title, lines, button) {
+  const content = document.createElement("div");
+  for (const [className, text] of [["title", title], ...lines.map((line) => ["line", line])]) {
+    const row = document.createElement("div");
+    row.className = className;
+    row.textContent = text;
+    content.append(row);
+  }
+  if (button) {
+    const details = document.createElement("button");
+    details.className = "details";
+    details.textContent = "See the full weather ↓";
+    details.style.background = `rgb(${data.accent.join(",")})`;
+    details.onclick = () =>
+      document.querySelector(".st-key-place")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    content.append(details);
+  }
+  return content;
+}
+
+function showPopup(state, lngLat, content) {
+  state.popup?.remove();
+  state.popup = new maplibregl.Popup({
+    className: `weather-popup${state.data.dark ? " dark" : ""}`,
+    maxWidth: "260px",
+    offset: 10,
+    focusAfterOpen: false,
+  })
+    .setLngLat(lngLat)
+    .setDOMContent(content)
+    .addTo(state.map);
+}
+
 async function create(parentElement, data, setTriggerValue) {
   await load(STYLESHEET, "link");
   for (const url of LIBRARIES) await load(url, "script");
@@ -182,6 +217,9 @@ async function create(parentElement, data, setTriggerValue) {
   });
   map.on("click", (event) => {
     const point = event.lngLat.wrap();
+    // At once a popup on the point, which the next run fills with its weather
+    state.shown = null;
+    showPopup(state, point, popupContent(state.data, "Loading the weather…", [], false));
     setTriggerValue("click", { lat: point.lat, lng: point.lng, resolution: state.resolution });
   });
   coverView();
@@ -202,6 +240,14 @@ export default async function (component) {
   if (data.view.id !== state.view) {
     state.view = data.view.id;
     state.map.flyTo({ center: [data.view.lng, data.view.lat], zoom: data.view.zoom, duration: 800 });
+  }
+  // The popup opens again when its place or its text changes; closed by the visitor, it stays closed until then
+  const { place } = data;
+  const shown = place && JSON.stringify([place.lat, place.lng, place.title, place.lines, data.dark]);
+  if (shown !== state.shown) {
+    state.shown = shown;
+    if (place) showPopup(state, [place.lng, place.lat], popupContent(data, place.title, place.lines, true));
+    else state.popup?.remove();
   }
   state.draw();
   return () => {

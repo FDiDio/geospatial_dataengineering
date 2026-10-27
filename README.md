@@ -277,12 +277,14 @@ st.pydeck_chart the app learns the clicked object only, not the clicked point no
 follow the map and a click far from the place took a first click to get there. The component covers the whole view
 with hexagons in the browser at each move, about 360 km across on the world and smaller as the map zooms in (the finest
 at least 3 + 1.2 × zoom pixels a side), and lights the one under the pointer. A click sends its point and its hexagon:
-the point is the place, the hexagon's size its **Hexagons** size, and the map stays where it is. The map lives as long
+the point is the place, the hexagon's size its **Hexagons** size, and the map stays where it is. A popup opens at once
+on the point and, with its weather in, sums up the day there, with a button down to the full weather of the place
+below the map, which people did not notice. The map lives as long
 as the page: each run gives it new layers, and it moves only to a searched place, a chosen hexagon size, from 138 to
 2.8 km across (the area of the altitude; the weather stays the 28 km ERA5 grid), or on **Recenter**. CARTO's raster
 tiles now print "API KEY REQUIRED" across the map, its vector tiles do not. The theme is in [.streamlit/config.toml](.streamlit/config.toml). On phones, narrower than 640 px,
 the map is shorter, one finger scrolls the page over it and two move it, and the tiles come two a row. The sidebar, with the
-search, starts open there too, and closes once a place is chosen, to show its weather. The page speaks plainly: the models are named in the credits only. It comes on demand from the ERA5 archive of
+search, starts closed there behind », as a line on the page says, and closes again once a place is chosen, to show its weather. The page speaks plainly: the models are named in the credits only. It comes on demand from the ERA5 archive of
 [Open-Meteo](https://open-meteo.com) (`models=era5`, the 0.25° grid of the pipeline; free for non-commercial use,
 CC BY 4.0): Open-Meteo stores ERA5 as time series, so a month of a place takes one small request, where the ARCO-ERA5
 Zarr store holds one global field per hour. ERA5 comes about five days behind real time: the days it has not

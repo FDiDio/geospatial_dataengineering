@@ -150,7 +150,7 @@ with st.sidebar:
     if score := eval_score(model, think):
         st.caption(score)
     st.button("New conversation", icon=":material/add_comment:", on_click=chat.clear)
-    # On a phone the sidebar, open at the start for the search of the weather page, would cover the chat
+    # On a phone the sidebar, if left open by the search of the weather page, would cover the chat
     if not st.session_state.get("asked_page_shown"):
         st.session_state["asked_page_shown"] = True
         st.html(phone.close_sidebar(), unsafe_allow_javascript=True)
