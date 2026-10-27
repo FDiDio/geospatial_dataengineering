@@ -18,7 +18,6 @@ import duckdb
 import h3
 import pandas as pd
 import streamlit as st
-from streamlit_folium import st_folium
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -161,6 +160,20 @@ def versus(value: float, month: pd.Series | None, statistic: str) -> str | None:
     return f"{value - month[statistic]:+.1f} °C vs month"
 
 
+def take_click() -> None:
+    """
+    A click on the map: its point is the new place, written in the place field before it is drawn, and its
+    hexagon gives the size of the place's. The map stays where the visitor has it.
+    """
+    click = maps.clicked((st.session_state.get("map") or {}).get("click"))
+    if click is not None:
+        latitude, longitude, resolution = click
+        sizes = queries.PLACE_RESOLUTIONS
+        st.session_state["place_query"] = places.format_coordinates(latitude, longitude)
+        st.session_state["hexagons"] = min(max(resolution, sizes[0]), sizes[-1])
+        st.session_state["map_clicked"] = True
+
+
 def recenter() -> None:
     st.session_state["recenter"] = True
 
@@ -285,15 +298,7 @@ try:
 except duckdb.Error:  # no warehouse yet
     dates = []
 
-# A click on the map gives its point, the new place, written in the place field before it is drawn. The value of
-# the map keeps its last click over the runs: a click is taken once. The map stays where it is, the point under
-# the pointer.
-clicked = maps.clicked_point(st.session_state.get("map"))
-clicked_now = False
-if clicked is not None and clicked != st.session_state.get("map_click"):
-    clicked_now = True
-    st.session_state["map_click"] = clicked
-    st.session_state["place_query"] = places.format_coordinates(*clicked)
+clicked_now = st.session_state.pop("map_clicked", False)
 
 with st.sidebar:
     st.header(":material/public: Weather")
@@ -362,7 +367,7 @@ st.html(
 
 on_map = day in dates
 # The size of the hexagons around a place, chosen above the map: read before its widget, from the last run
-resolution = st.session_state.get("hexagons") or queries.PLACE_RESOLUTION
+resolution = st.session_state.setdefault("hexagons", queries.PLACE_RESOLUTION)
 if dates and not on_map:
     st.caption(f"The map has colors on the ingested days only, from {dates[0]:%d %b %Y} to {dates[-1]:%d %b %Y}.")
 
@@ -391,55 +396,57 @@ elif bbox is None:
 else:
     lat_min, lat_max, lon_min, lon_max = bbox
     # The area across most of the map: each zoom level halves the degrees it spans
-    view = ((lat_min + lat_max) / 2, (lon_min + lon_max) / 2), math.log2(360 / (lon_max - lon_min)) + 1.5
+    view = ((lat_min + lat_max) / 2, (lon_min + lon_max) / 2), math.log2(360 / (lon_max - lon_min)) + 0.5
 
-# The map moves to a searched place, a new hexagon size or area, and on Recenter: streamlit-folium moves it when its
-# center or zoom changes, so a nudge takes it back to the same view. After a click it stays where the visitor has it.
+# The map moves to a searched place, a new hexagon size or area, and on Recenter: to its view whenever the number
+# of the view changes. After a click it stays where the visitor has it.
 recentered = st.session_state.pop("recenter", False)
 if (place, bbox, resolution) != st.session_state.get("viewed") or recentered:
     st.session_state["viewed"] = (place, bbox, resolution)
     if recentered or not clicked_now:
         st.session_state["views"] = st.session_state.get("views", 0) + 1
         st.session_state["view"] = view
-(view_latitude, view_longitude), view_zoom = st.session_state["view"]
-nudge = st.session_state["views"] % 2 * 1e-6
-
-layers = []
-if on_map:
-    layers.append(maps.values_layer(list(values["h3"]), list(values["value_text"]), list(values["color"])))
-if place is not None and cell is not None:
-    layers.append(maps.place_layer(place.latitude, place.longitude, cell, maps.rgba(ACCENT[theme])))
 
 with st.container(horizontal=True, vertical_alignment="bottom", gap="medium"):
     st.segmented_control(
         "Hexagons",
         queries.PLACE_RESOLUTIONS,
-        default=queries.PLACE_RESOLUTION,
         required=True,
         format_func=queries.hexagon_size,
         key="hexagons",
         disabled=place is None,
-        help="Size of the hexagon of a place, from corner to corner, where the map zooms to: the altitude is of the "
-        "hexagon, the weather comes from a grid of 28 km whatever the size.",
+        help="Size of the hexagon of a place, from corner to corner, where the map zooms to; a click on the map takes "
+        "the size of its hexagon. The altitude is of the hexagon, the weather comes from a grid of 28 km whatever the "
+        "size.",
     )
     st.button("Recenter", icon=":material/my_location:", on_click=recenter)
 
-# The map is the same at every run, so that Streamlit never draws it again: the layers and the view change in the
-# browser, and only a click reruns the page
-st_folium(
-    maps.base(theme, maps.rgba(GRID[theme]), maps.rgba(ACCENT[theme]), phone.is_phone()),
+on_phone = phone.is_phone()
+cells = (
+    [
+        {"h3": h3_index, "color": color, "text": text}
+        for h3_index, color, text in zip(values["h3"], values["color"], values["value_text"], strict=True)
+    ]
+    if on_map
+    else []
+)
+maps.show(
+    maps.data(
+        theme,
+        GRID[theme],
+        ACCENT[theme],
+        st.session_state["view"],
+        st.session_state["views"],
+        MAP_HEIGHT["phone" if on_phone else "desktop"],
+        on_phone,
+        place=None if place is None or cell is None else (place.latitude, place.longitude, cell),
+        values=cells,
+    ),
     key="map",
-    height=MAP_HEIGHT["phone" if phone.is_phone() else "desktop"],
-    use_container_width=True,
-    returned_objects=["last_clicked"],
-    center=(view_latitude + nudge, view_longitude + nudge),
-    zoom=view_zoom + nudge,  # a fraction, which zoomSnap allows
-    feature_group_to_add=layers,
-    wrap_longitude=True,
+    on_click=take_click,
 )
 st.caption(
-    ":material/touch_app: Click anywhere on the map for its weather. The hexagons follow the zoom: zoom in for "
-    "smaller ones, or choose the size of the place's above."
+    ":material/touch_app: Click a hexagon for the weather there. Zoom in for smaller hexagons, out for larger ones."
 )
 
 if on_map:

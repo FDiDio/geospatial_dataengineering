@@ -45,10 +45,8 @@ orchestration = [
 # Streamlit H3 map (src/dashboard/)
 dashboard = [
     "duckdb>=1.4,<2",
-    "folium>=0.20",
     "ollama>=0.6.3",
-    "streamlit>=1.45",
-    "streamlit-folium>=0.27",
+    "streamlit>=1.66",
 ]
 
 [tool.uv]

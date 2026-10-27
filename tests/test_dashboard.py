@@ -3,7 +3,6 @@ import io
 import json
 import math
 import os
-import re
 import urllib.error
 import urllib.parse
 from datetime import date, timedelta
@@ -15,7 +14,7 @@ import streamlit as st
 from conftest import fake_archive_fetch
 from streamlit.testing.v1 import AppTest
 
-from dashboard import archive, maps, places, terrain
+from dashboard import archive, maps, places, queries, terrain
 from dashboard.queries import (
     BLUES,
     COLD_ARM,
@@ -338,10 +337,9 @@ def test_a_place_at_coordinates_is_named_by_them():
     assert (place.name, place.short_name, place.kind) == ("45.4600, 9.1900", "45.4600, 9.1900", "coordinates")
 
 
-def test_the_clicked_point_is_the_last_click_on_the_map():
-    assert maps.clicked_point({"last_clicked": {"lat": 45.46, "lng": 9.19}}) == (45.46, 9.19)
-    assert maps.clicked_point({"last_clicked": None}) is None
-    assert maps.clicked_point(None) is None
+def test_a_click_gives_its_point_and_the_size_of_its_hexagon():
+    assert maps.clicked({"lat": 45.46, "lng": 9.19, "resolution": 5}) == (45.46, 9.19, 5)
+    assert maps.clicked(None) is None
 
 
 def test_reverse_geocoding_names_the_point_or_nothing_at_sea(monkeypatch):
@@ -354,49 +352,49 @@ def test_reverse_geocoding_names_the_point_or_nothing_at_sea(monkeypatch):
     assert places.reverse(40.0, -40.0) is None
 
 
-def test_a_hexagon_across_the_antimeridian_stays_whole():
-    corners = maps.boundary(h3.latlng_to_cell(0.0, 179.99, 2))
-    longitudes = [lon for lon, _ in corners]
-
-    # Closed, and east of 180° rather than spread across the world
-    assert corners[0] == corners[-1]
-    assert max(longitudes) > 180 and max(longitudes) - min(longitudes) < 10
-
-
-@pytest.mark.parametrize("on_phone", [False, True])
-def test_the_map_is_the_same_at_every_run(on_phone):
-    def html():
-        return maps.base("light", "rgba(40, 50, 70, 0.18)", "rgba(42, 120, 214, 1.00)", on_phone).get_root().render()
-
-    page = html()
-    # The vector basemap of CARTO, its raster tiles asking for a key; the grid drawn by the browser with h3-js
-    assert "positron-gl-style/style.json" in page and "apikey" not in page
-    assert "h3-js@4.4.0" in page and "h3.polygonToCells" in page and "rgba(40, 50, 70, 0.18)" in page
-    # On a phone one finger scrolls the page, two move the map
-    assert ("gestureHandling.enable()" in page) == on_phone
-    # The same map at every run, but for the names folium draws at random: Streamlit never draws it again
-    assert re.sub(r"_[0-9a-f]{32}", "", page) == re.sub(r"_[0-9a-f]{32}", "", html())
-
-
-def test_the_layers_of_a_place_and_of_a_mart():
+def test_the_data_of_the_map():
     cell = h3.latlng_to_cell(47.37, 8.54, 7)
-    figure = maps.base("light", "rgba(40, 50, 70, 0.18)", "rgba(42, 120, 214, 1.00)", False)
-    maps.place_layer(47.37, 8.54, cell, "rgba(42, 120, 214, 1.00)").add_to(figure)
-    assert not maps.values_layer([], [], [])._children  # a day without events: nothing to draw
-    maps.values_layer([h3.latlng_to_cell(47.0, 8.0, 4)], ["31.2 °C"], [[227, 73, 72, 220]]).add_to(figure)
+    values = [{"h3": h3.latlng_to_cell(47.0, 8.0, 4), "color": [227, 73, 72, 220], "text": "31.2 °C"}]
+    data = maps.data(
+        "dark", [220, 225, 235, 40], [57, 135, 229], ((47.37, 8.54), 9.5), 3, 380, True, (47.37, 8.54, cell), values
+    )
 
-    page = figure.get_root().render()
-    assert cell in page and "rgba(42, 120, 214, 1.00)" in page
-    # The value under the pointer, in the JSON of the map
-    assert json.dumps("31.2 °C") in page and "rgba(227, 73, 72, 0.86)" in page
+    assert data["style"].endswith("dark-matter-gl-style/style.json")
+    assert data["view"] == {"lat": 47.37, "lng": 8.54, "zoom": 9.5, "id": 3}
+    assert data["place"] == {"lat": 47.37, "lng": 8.54, "cell": cell}
+    assert (data["height"], data["phone"], data["values"]) == (380, True, values)
+    assert json.loads(json.dumps(data)) == data  # what the browser gets
+    assert maps.data("light", [0, 0, 0, 40], [0, 0, 0], maps.WORLD_VIEW, 1, 580, False)["place"] is None
+
+
+def test_the_script_of_the_map():
+    with open(os.path.join(os.path.dirname(maps.__file__), "weather_map.js"), encoding="utf-8") as file:
+        script = file.read()
+
+    # Libraries of fixed versions; MapLibre 6 comes as an ES module only
+    for library in ("maplibre-gl@5.24.0", "deck.gl@9.3.11", "h3-js@4.4.0"):
+        assert library in script
+    # A click sends its point and the resolution of its hexagon; on a phone two fingers move the map
+    assert 'setTriggerValue("click", { lat: point.lat, lng: point.lng, resolution: state.resolution })' in script
+    assert "cooperativeGestures: data.phone" in script
+    assert "Math.min(16, 3 + 1.2 * zoom)" in script
 
 
 def test_the_zoom_of_a_hexagon_size():
-    # Hexagons of 20 km at 45°, 32 pixels a side; each finer resolution, about √7 times smaller, zooms in by about 1.4
-    assert maps.zoom_for(5, 45.0) == pytest.approx(8.49, abs=0.01)
+    # Hexagons of 20 km at 45°, 18 pixels a side; each finer resolution, about √7 times smaller, zooms in by about 1.4
+    assert maps.zoom_for(5, 45.0) == pytest.approx(6.66, abs=0.01)
     assert maps.zoom_for(7, 45.0) - maps.zoom_for(5, 45.0) == pytest.approx(2 * math.log2(math.sqrt(7)), abs=0.05)
     # Nearer the poles a degree spans fewer meters: the map zooms in less
     assert maps.zoom_for(5, 60.0) < maps.zoom_for(5, 45.0)
+    # At the zoom of a size, the browser draws hexagons of that size: the finest at least 3 + 1.2 × z pixels a side,
+    # z the zoom of the same scale at the equator, at every latitude
+    for latitude in (0.0, 45.0, 65.0):
+        for resolution in queries.PLACE_RESOLUTIONS:
+            zoom = maps.zoom_for(resolution, latitude)
+            meters_per_pixel = maps.EQUATOR_M * math.cos(math.radians(latitude)) / (maps.TILE_PX * 2**zoom)
+            edge = min(16, 3 + 1.2 * math.log2(maps.EQUATOR_M / (maps.TILE_PX * meters_per_pixel)))
+            sides = [h3.average_hexagon_edge_length(r, unit="m") / meters_per_pixel for r in range(16)]
+            assert max(r for r, side in enumerate(sides) if side >= edge) == resolution
 
 
 def test_hexagon_sizes_from_corner_to_corner():
@@ -541,12 +539,15 @@ def test_a_place_typed_or_clicked_as_coordinates(monkeypatch, tmp_path):
     assert "Near Zürich, Schweiz" in [caption.value for caption in app.caption]
     assert any("weather model, 47.25° 8.50°" in caption.value for caption in app.caption)
 
-    # A click on the map writes its point in the place field, once: the value of the map keeps the last click.
-    # The map stays where the visitor has it.
+    # A click on the map, as its callback takes it: its point in the place field, the size of its hexagon for the
+    # place's. The map stays where the visitor has it.
     view = app.session_state["view"]
-    app.session_state["map"] = {"last_clicked": {"lat": 45.46, "lng": 9.19}}
+    app.session_state["place_query"] = "45.4600, 9.1900"
+    app.session_state["hexagons"] = 5
+    app.session_state["map_clicked"] = True
     app.run(timeout=60)
     assert app.session_state["view"] == view
+    assert app.button_group[0].value == 5
     assert not app.exception
     assert app.sidebar.text_input[0].value == "45.4600, 9.1900"
     assert app.subheader[0].value == "45.4600, 9.1900"

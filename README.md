@@ -49,7 +49,7 @@ reach of a quick question. This project makes it usable in two ways:
   **heatwave** and **extreme precipitation** detection, with 29 data tests.
 - **Dagster** orchestration: daily partitioned assets, dbt models as assets, data contract and dbt tests as asset checks,
   and a sensor launching each day when ERA5 publishes it.
-- **Streamlit + Leaflet** map of the marts on H3 hexagons, and the weather of any place since 1940 on demand.
+- **Streamlit + deck.gl** map of the marts on H3 hexagons, and the weather of any place since 1940 on demand.
 - **Weather agent**: an open LLM (Qwen3, served by Ollama on a laptop GPU) that answers questions in plain language
   by calling tools and writing SQL, with an evaluation set comparing models.
 - **Docker**, **Terraform** (Cloud Run job, Cloud Scheduler, GCS, BigQuery external tables) and **GitHub Actions** CI.
@@ -271,16 +271,16 @@ with the same statistics month by month; and the hourly temperature, precipitati
 where it blows, in local time. Its tabs open on the day, then come its month and its year. Its H3 cell is outlined on the map, with its **mean altitude** and range, sampled at 49 points of the Copernicus
 90 m elevation model (Open-Meteo elevation API).
 
-The map, [maps.py](src/dashboard/maps.py), is Leaflet through streamlit-folium, which gives the point of a click: a
-click anywhere picks that point, and the map stays where it is. It replaced deck.gl, which tells Streamlit the clicked
-object only, so the map was clickable through invisible hexagons, and a click far from the place took a first click to
-get there. The map itself is the same at every run, so Streamlit never draws it again: the place and its hexagon come
-as layers that streamlit-folium swaps in the browser, and a search, a hexagon size or **Recenter** moves the view. The
-browser draws the hexagons over the whole view with h3-js at each move, the finest at least 24 pixels a side, and
-lights the one under the pointer. The **Hexagons** control, from 138 to 2.8 km across (resolutions 3 to 7, 2.8 km by
-default), sizes the hexagon of the place, the area of its altitude (its weather stays the 28 km ERA5 grid), and zooms
-the map to hexagons of that size. The basemap is CARTO's, drawn by MapLibre from its vector tiles: its raster tiles
-now print "API KEY REQUIRED" across the map. The theme is in [.streamlit/config.toml](.streamlit/config.toml). On phones, narrower than 640 px,
+The map is a Streamlit component, [weather_map.js](src/dashboard/weather_map.js) with
+[maps.py](src/dashboard/maps.py): MapLibre draws the CARTO basemap from its vector tiles, deck.gl the hexagons. With
+st.pydeck_chart the app learns the clicked object only, not the clicked point nor the view, so the hexagons could not
+follow the map and a click far from the place took a first click to get there. The component covers the whole view
+with hexagons in the browser at each move, about 360 km across on the world and smaller as the map zooms in (the finest
+at least 3 + 1.2 × zoom pixels a side), and lights the one under the pointer. A click sends its point and its hexagon:
+the point is the place, the hexagon's size its **Hexagons** size, and the map stays where it is. The map lives as long
+as the page: each run gives it new layers, and it moves only to a searched place, a chosen hexagon size, from 138 to
+2.8 km across (the area of the altitude; the weather stays the 28 km ERA5 grid), or on **Recenter**. CARTO's raster
+tiles now print "API KEY REQUIRED" across the map, its vector tiles do not. The theme is in [.streamlit/config.toml](.streamlit/config.toml). On phones, narrower than 640 px,
 the map is shorter, one finger scrolls the page over it and two move it, and the tiles come two a row. The sidebar, with the
 search, starts open there too, and closes once a place is chosen, to show its weather. The page speaks plainly: the models are named in the credits only. It comes on demand from the ERA5 archive of
 [Open-Meteo](https://open-meteo.com) (`models=era5`, the 0.25° grid of the pipeline; free for non-commercial use,

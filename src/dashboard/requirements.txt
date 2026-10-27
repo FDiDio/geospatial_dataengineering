@@ -2,9 +2,6 @@
 # without the rest of the project (Streamlit Community Cloud reads this file next to the app).
 # The whole project is installed with uv sync.
 streamlit==1.66.1
-# The map: Leaflet through streamlit-folium, which gives the point of a click
-folium==0.20.0
-streamlit-folium==0.27.4
 altair==6.3.0
 pandas==3.1.0
 numpy==2.5.4
