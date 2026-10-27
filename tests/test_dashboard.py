@@ -354,17 +354,6 @@ def test_reverse_geocoding_names_the_point_or_nothing_at_sea(monkeypatch):
     assert places.reverse(40.0, -40.0) is None
 
 
-def test_grid_cells_cover_the_world_or_a_window():
-    world = maps.grid_cells(None, 1)
-    assert len(world) == len(set(world)) == 842
-
-    bbox = (44.46, 46.46, 7.19, 11.19)
-    window = maps.grid_cells(bbox, 5)
-    centers = [h3.cell_to_latlng(cell) for cell in window]
-    assert len(window) > 100 and all(h3.get_resolution(cell) == 5 for cell in window)
-    assert all(bbox[0] <= lat <= bbox[1] and bbox[2] <= lon <= bbox[3] for lat, lon in centers)
-
-
 def test_a_hexagon_across_the_antimeridian_stays_whole():
     corners = maps.boundary(h3.latlng_to_cell(0.0, 179.99, 2))
     longitudes = [lon for lon, _ in corners]
@@ -375,29 +364,39 @@ def test_a_hexagon_across_the_antimeridian_stays_whole():
 
 
 @pytest.mark.parametrize("on_phone", [False, True])
-def test_the_map_of_a_place(on_phone):
-    cell = h3.latlng_to_cell(47.37, 8.54, 7)
-    figure = maps.base((47.37, 8.54), 10.3, "light", on_phone)
-    maps.add_grid(figure, h3.grid_disk(cell, maps.RINGS), maps.rgba([40, 50, 70, 45]))
-    maps.add_place(figure, 47.37, 8.54, cell, maps.rgba([42, 120, 214]))
+def test_the_map_is_the_same_at_every_run(on_phone):
+    def html():
+        return maps.base("light", "rgba(40, 50, 70, 0.18)", "rgba(42, 120, 214, 1.00)", on_phone).get_root().render()
 
-    html = figure.get_root().render()
-    # The patch of hexagons around the place, and its own over them
-    assert len(re.findall(r'"h3": "', html)) == 3 * maps.RINGS * (maps.RINGS + 1) + 1 + 1
-    assert "rgba(40, 50, 70, 0.18)" in html and "rgba(42, 120, 214, 1.00)" in html
-    assert "basemaps.cartocdn.com/gl/positron-gl-style/style.json" in html and "apikey" not in html
+    page = html()
+    # The vector basemap of CARTO, its raster tiles asking for a key; the grid drawn by the browser with h3-js
+    assert "positron-gl-style/style.json" in page and "apikey" not in page
+    assert "h3-js@4.4.0" in page and "h3.polygonToCells" in page and "rgba(40, 50, 70, 0.18)" in page
     # On a phone one finger scrolls the page, two move the map
-    assert ("gestureHandling.enable()" in html) == on_phone
+    assert ("gestureHandling.enable()" in page) == on_phone
+    # The same map at every run, but for the names folium draws at random: Streamlit never draws it again
+    assert re.sub(r"_[0-9a-f]{32}", "", page) == re.sub(r"_[0-9a-f]{32}", "", html())
 
 
-def test_the_cells_of_a_mart_on_the_map():
-    figure = maps.base((47.0, 8.0), 6.0, "light", False)
-    maps.add_values(figure, [], [], [])  # a day without events: nothing to draw
-    maps.add_values(figure, [h3.latlng_to_cell(47.0, 8.0, 4)], ["31.2 °C"], [[227, 73, 72, 220]])
+def test_the_layers_of_a_place_and_of_a_mart():
+    cell = h3.latlng_to_cell(47.37, 8.54, 7)
+    figure = maps.base("light", "rgba(40, 50, 70, 0.18)", "rgba(42, 120, 214, 1.00)", False)
+    maps.place_layer(47.37, 8.54, cell, "rgba(42, 120, 214, 1.00)").add_to(figure)
+    assert not maps.values_layer([], [], [])._children  # a day without events: nothing to draw
+    maps.values_layer([h3.latlng_to_cell(47.0, 8.0, 4)], ["31.2 °C"], [[227, 73, 72, 220]]).add_to(figure)
 
-    html = figure.get_root().render()
-    # The value under the pointer, ° escaped in the JSON of the map
-    assert r"31.2 \u00b0C" in html and "rgba(227, 73, 72, 0.86)" in html
+    page = figure.get_root().render()
+    assert cell in page and "rgba(42, 120, 214, 1.00)" in page
+    # The value under the pointer, in the JSON of the map
+    assert json.dumps("31.2 °C") in page and "rgba(227, 73, 72, 0.86)" in page
+
+
+def test_the_zoom_of_a_hexagon_size():
+    # Hexagons of 20 km at 45°, 32 pixels a side; each finer resolution, about √7 times smaller, zooms in by about 1.4
+    assert maps.zoom_for(5, 45.0) == pytest.approx(8.49, abs=0.01)
+    assert maps.zoom_for(7, 45.0) - maps.zoom_for(5, 45.0) == pytest.approx(2 * math.log2(math.sqrt(7)), abs=0.05)
+    # Nearer the poles a degree spans fewer meters: the map zooms in less
+    assert maps.zoom_for(5, 60.0) < maps.zoom_for(5, 45.0)
 
 
 def test_hexagon_sizes_from_corner_to_corner():
@@ -542,9 +541,12 @@ def test_a_place_typed_or_clicked_as_coordinates(monkeypatch, tmp_path):
     assert "Near Zürich, Schweiz" in [caption.value for caption in app.caption]
     assert any("weather model, 47.25° 8.50°" in caption.value for caption in app.caption)
 
-    # A click on the map writes its point in the place field, once: the value of the map keeps the last click
+    # A click on the map writes its point in the place field, once: the value of the map keeps the last click.
+    # The map stays where the visitor has it.
+    view = app.session_state["view"]
     app.session_state["map"] = {"last_clicked": {"lat": 45.46, "lng": 9.19}}
     app.run(timeout=60)
+    assert app.session_state["view"] == view
     assert not app.exception
     assert app.sidebar.text_input[0].value == "45.4600, 9.1900"
     assert app.subheader[0].value == "45.4600, 9.1900"
@@ -615,25 +617,25 @@ def test_today_is_a_forecast_left_out_of_the_statistics(monkeypatch, tmp_path):
 
 def test_recenter_and_hexagon_sizes(monkeypatch, tmp_path):
     app = run_app(monkeypatch, tmp_path)
-    assert app.session_state["view"] == ((25.0, 10.0), 2.0)  # the world
+    assert app.session_state["view"] == maps.WORLD_VIEW
     app.sidebar.text_input[0].set_value("Zurich").run(timeout=60)
-    # Hexagons of 2.8 km by default: the place gets its resolution 7 cell, zoomed in to keep them as large
-    fine = 8.5 + 2 * math.log2(math.sqrt(7))
+    # Hexagons of 2.8 km by default: the place gets its resolution 7 cell, and the map zooms to hexagons of its size
+    fine = maps.zoom_for(7, 47.37)
     assert app.session_state["view"] == ((47.37, 8.54), pytest.approx(fine))
     assert any(":material/hexagon: 5 km² hexagon" in markdown.value for markdown in app.markdown)
 
-    # Recenter draws the map again at the place: a new view, of the same center and zoom
+    # Recenter takes the map back to the place: a new view, of the same center and zoom
     views = app.session_state["views"]
     next(button for button in app.button if button.label == "Recenter").click().run(timeout=60)
     assert not app.exception
     assert app.session_state["views"] == views + 1
     assert app.session_state["view"] == ((47.37, 8.54), pytest.approx(fine))
 
-    # Hexagons of 20 km: the resolution 5 cell, and the map zooms out to keep them as large
+    # Hexagons of 20 km: the resolution 5 cell, and the map zooms out to hexagons of its size
     app.button_group[0].set_value(5).run(timeout=60)
     assert not app.exception
     assert any(":material/hexagon: 242 km² hexagon" in markdown.value for markdown in app.markdown)
-    assert app.session_state["view"][1] == pytest.approx(8.5)
+    assert app.session_state["view"][1] == pytest.approx(maps.zoom_for(5, 47.37))
 
 
 def test_the_chosen_place_stays_when_the_day_changes(monkeypatch, tmp_path):

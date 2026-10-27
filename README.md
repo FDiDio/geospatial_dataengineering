@@ -272,14 +272,15 @@ where it blows, in local time. Its tabs open on the day, then come its month and
 90 m elevation model (Open-Meteo elevation API).
 
 The map, [maps.py](src/dashboard/maps.py), is Leaflet through streamlit-folium, which gives the point of a click: a
-click anywhere picks that point. It replaced deck.gl, which tells Streamlit the clicked object only, so the map was
-clickable through invisible hexagons, and a click far from the place took a first click to get there. The hexagons
-stay for their look and the area of the place: its cell and a patch of 331 around it, from 138 to 2.8 km across
-(resolutions 3 to 7, 2.8 km by default) with the **Hexagons** control, which also sizes the area of its altitude (its
-weather stays the 28 km ERA5 grid); a light grid on the world or an area otherwise. The basemap is CARTO's, drawn by
-MapLibre from its vector tiles: its raster tiles now print "API KEY REQUIRED" across the map. Only a click reruns the
-page, and the map is drawn again only when its content changes, so a tab or a day keeps the view; **Recenter** goes
-back to the place. The theme is in [.streamlit/config.toml](.streamlit/config.toml). On phones, narrower than 640 px,
+click anywhere picks that point, and the map stays where it is. It replaced deck.gl, which tells Streamlit the clicked
+object only, so the map was clickable through invisible hexagons, and a click far from the place took a first click to
+get there. The map itself is the same at every run, so Streamlit never draws it again: the place and its hexagon come
+as layers that streamlit-folium swaps in the browser, and a search, a hexagon size or **Recenter** moves the view. The
+browser draws the hexagons over the whole view with h3-js at each move, the finest at least 24 pixels a side, and
+lights the one under the pointer. The **Hexagons** control, from 138 to 2.8 km across (resolutions 3 to 7, 2.8 km by
+default), sizes the hexagon of the place, the area of its altitude (its weather stays the 28 km ERA5 grid), and zooms
+the map to hexagons of that size. The basemap is CARTO's, drawn by MapLibre from its vector tiles: its raster tiles
+now print "API KEY REQUIRED" across the map. The theme is in [.streamlit/config.toml](.streamlit/config.toml). On phones, narrower than 640 px,
 the map is shorter, one finger scrolls the page over it and two move it, and the tiles come two a row. The sidebar, with the
 search, starts open there too, and closes once a place is chosen, to show its weather. The page speaks plainly: the models are named in the credits only. It comes on demand from the ERA5 archive of
 [Open-Meteo](https://open-meteo.com) (`models=era5`, the 0.25° grid of the pipeline; free for non-commercial use,

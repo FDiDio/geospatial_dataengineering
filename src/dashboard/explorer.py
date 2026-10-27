@@ -38,11 +38,6 @@ ACCENT = {"light": [42, 120, 214], "dark": [57, 135, 229]}
 GRID = {"light": [40, 50, 70, 45], "dark": [220, 225, 235, 40]}
 MUTED = {"light": "#5b6573", "dark": "#a3acb9"}
 CHART_GRID = {"light": "#e9ecf0", "dark": "#273039"}
-# Zoom of Leaflet on a place: its 20 km hexagon about 60 pixels across. Each finer resolution of hexagons is
-# √7 times smaller, so the map zooms in by log2(√7) levels to keep them as large.
-PLACE_ZOOM = 8.5
-ZOOM_PER_RESOLUTION = math.log2(math.sqrt(7))
-WORLD_VIEW = ((25.0, 10.0), 2.0)
 # Height of the map, in pixels: on a phone, shorter, so that the page around it is easy to scroll
 MAP_HEIGHT = {"desktop": 580, "phone": 380}
 # Width of a metric tile, in pixels: tiles of a fixed width wrap onto new rows in a narrow window, where
@@ -118,11 +113,6 @@ def load_weather(latitude: float, longitude: float, year: int) -> tuple[archive.
 @st.cache_data(show_spinner=False)
 def cell_altitude(cell: str) -> terrain.Altitude:
     return terrain.cell_altitude(cell)
-
-
-@st.cache_data(show_spinner=False)
-def grid_cells(bbox: tuple[float, float, float, float] | None, resolution: int) -> list[str]:
-    return maps.grid_cells(bbox, resolution)
 
 
 def measure(value: float | None, unit: str) -> str:
@@ -296,9 +286,12 @@ except duckdb.Error:  # no warehouse yet
     dates = []
 
 # A click on the map gives its point, the new place, written in the place field before it is drawn. The value of
-# the map keeps its last click over the runs: a click is taken once.
+# the map keeps its last click over the runs: a click is taken once. The map stays where it is, the point under
+# the pointer.
 clicked = maps.clicked_point(st.session_state.get("map"))
+clicked_now = False
 if clicked is not None and clicked != st.session_state.get("map_click"):
+    clicked_now = True
     st.session_state["map_click"] = clicked
     st.session_state["place_query"] = places.format_coordinates(*clicked)
 
@@ -392,34 +385,30 @@ if on_map:
 cell = h3.latlng_to_cell(place.latitude, place.longitude, resolution) if place else None
 
 if place is not None:
-    center, zoom = (place.latitude, place.longitude), PLACE_ZOOM + ZOOM_PER_RESOLUTION * (resolution - 5)
+    view = (place.latitude, place.longitude), maps.zoom_for(resolution, place.latitude)
 elif bbox is None:
-    center, zoom = WORLD_VIEW
+    view = maps.WORLD_VIEW
 else:
     lat_min, lat_max, lon_min, lon_max = bbox
     # The area across most of the map: each zoom level halves the degrees it spans
-    center, zoom = ((lat_min + lat_max) / 2, (lon_min + lon_max) / 2), math.log2(360 / (lon_max - lon_min)) + 1.5
+    view = ((lat_min + lat_max) / 2, (lon_min + lon_max) / 2), math.log2(360 / (lon_max - lon_min)) + 1.5
 
-# Streamlit draws the map again only when its code changes, keeping the view of the visitor otherwise: a new
-# place, area or hexagon size moves it there, and the Recenter button nudges the view, which changes the code
-if (place, bbox, resolution) != st.session_state.get("viewed") or st.session_state.pop("recenter", False):
+# The map moves to a searched place, a new hexagon size or area, and on Recenter: streamlit-folium moves it when its
+# center or zoom changes, so a nudge takes it back to the same view. After a click it stays where the visitor has it.
+recentered = st.session_state.pop("recenter", False)
+if (place, bbox, resolution) != st.session_state.get("viewed") or recentered:
     st.session_state["viewed"] = (place, bbox, resolution)
-    st.session_state["views"] = st.session_state.get("views", 0) + 1
-    st.session_state["view"] = (center, zoom)
+    if recentered or not clicked_now:
+        st.session_state["views"] = st.session_state.get("views", 0) + 1
+        st.session_state["view"] = view
 (view_latitude, view_longitude), view_zoom = st.session_state["view"]
 nudge = st.session_state["views"] % 2 * 1e-6
-figure = maps.base((view_latitude + nudge, view_longitude + nudge), view_zoom, theme, phone.is_phone())
+
+layers = []
 if on_map:
-    maps.add_values(figure, list(values["h3"]), list(values["value_text"]), list(values["color"]))
-# The hexagons of the place's size around it, or a light grid on the world or the area
-if cell is not None:
-    maps.add_grid(figure, h3.grid_disk(cell, maps.RINGS), maps.rgba(GRID[theme]))
-else:
-    maps.add_grid(
-        figure, grid_cells(bbox, maps.GRID_RESOLUTION["world" if bbox is None else "area"]), maps.rgba(GRID[theme])
-    )
+    layers.append(maps.values_layer(list(values["h3"]), list(values["value_text"]), list(values["color"])))
 if place is not None and cell is not None:
-    maps.add_place(figure, place.latitude, place.longitude, cell, maps.rgba(ACCENT[theme]))
+    layers.append(maps.place_layer(place.latitude, place.longitude, cell, maps.rgba(ACCENT[theme])))
 
 with st.container(horizontal=True, vertical_alignment="bottom", gap="medium"):
     st.segmented_control(
@@ -430,23 +419,27 @@ with st.container(horizontal=True, vertical_alignment="bottom", gap="medium"):
         format_func=queries.hexagon_size,
         key="hexagons",
         disabled=place is None,
-        help="Size of the hexagon of a place and of the ones drawn around it, from corner to corner. "
-        "The altitude is of the hexagon; the weather comes from a grid of 28 km whatever the size.",
+        help="Size of the hexagon of a place, from corner to corner, where the map zooms to: the altitude is of the "
+        "hexagon, the weather comes from a grid of 28 km whatever the size.",
     )
     st.button("Recenter", icon=":material/my_location:", on_click=recenter)
 
-# Only a click reruns the page: a pan or a zoom stays in the browser
+# The map is the same at every run, so that Streamlit never draws it again: the layers and the view change in the
+# browser, and only a click reruns the page
 st_folium(
-    figure,
+    maps.base(theme, maps.rgba(GRID[theme]), maps.rgba(ACCENT[theme]), phone.is_phone()),
     key="map",
     height=MAP_HEIGHT["phone" if phone.is_phone() else "desktop"],
     use_container_width=True,
     returned_objects=["last_clicked"],
+    center=(view_latitude + nudge, view_longitude + nudge),
+    zoom=view_zoom + nudge,  # a fraction, which zoomSnap allows
+    feature_group_to_add=layers,
     wrap_longitude=True,
 )
 st.caption(
-    ":material/touch_app: Click the map for the weather of a point: its hexagon has the size chosen above. "
-    "Zoom with the mouse wheel, the + and − buttons or two fingers."
+    ":material/touch_app: Click anywhere on the map for its weather. The hexagons follow the zoom: zoom in for "
+    "smaller ones, or choose the size of the place's above."
 )
 
 if on_map:
