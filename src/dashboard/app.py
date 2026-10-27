@@ -7,17 +7,15 @@ about it in plain language.
 
 import streamlit as st
 
-# On phones, narrower than 640 px. The map takes a finger dragging on it, not the page: shorter, it leaves room
-# to scroll. Two tiles a row, with smaller numbers, their labels wrapped rather than cut short. The hexagon sizes
-# and the example questions fit the width. The line on where the search is shows on phones only, where the
-# sidebar starts closed.
+# On phones, narrower than 640 px (the map is shorter there, explorer.py). Two tiles a row, with smaller numbers,
+# their labels wrapped rather than cut short. The hexagon sizes and the example questions fit the width. The line
+# on where the search is shows on phones only, where the sidebar closes once a place is chosen.
 PHONE_CSS = """
 [data-testid="stElementContainer"]:has(.phone-only) {display: none}
 @media (max-width: 640px) {
   [data-testid="stElementContainer"]:has(.phone-only) {display: block}
   [data-testid="stMainBlockContainer"] {padding-top: 4rem}
   [data-testid="stMainBlockContainer"] h1 {font-size: 2rem}
-  .st-key-map [data-testid="stDeckGlJsonChart"] {height: 380px !important}
   [data-testid="stElementContainer"]:has(> [data-testid="stMetric"]) {
     flex: 0 0 calc(50% - 0.5rem) !important; width: calc(50% - 0.5rem) !important; max-width: none !important;
   }

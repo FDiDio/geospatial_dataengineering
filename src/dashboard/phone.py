@@ -1,5 +1,12 @@
 """The dashboard on phones, narrower than 640 px, where Streamlit shows the sidebar over the page."""
 
+import streamlit as st
+
+
+def is_phone() -> bool:
+    """Whether the browser of the session is a phone's, by its user agent: the server does not see the screen."""
+    return "Mobi" in (st.context.headers.get("User-Agent") or "")
+
 
 def close_sidebar(run: int = 0) -> str:
     """

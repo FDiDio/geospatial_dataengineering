@@ -17,16 +17,10 @@ DEFAULT_WAREHOUSE = os.path.join(PROJECT_ROOT, "output", "warehouse.duckdb")
 ZOOM_RESOLUTION = 4
 # Half height of the map window around a searched place, in degrees of latitude (twice as wide in longitude)
 PLACE_WINDOW_DEG = 8.0
-# Invisible hexagons make the map clickable: about 360 km across on the world, where a first click zooms in,
-# 140 km on an area, and by default 20 km around a place, finer than the 0.25° (28 km) grid of ERA5
-PICK_RESOLUTION = {"world": 2, "area": 3, "place": 5}
 # The sizes of the hexagons around a place to choose from, from 140 to 3 km across, and the one of a place by
 # default: the finest, 2.8 km across and about 5 km², whose altitude is the closest to the place's own
 PLACE_RESOLUTIONS = (3, 4, 5, 6, 7)
 PLACE_RESOLUTION = 7
-# Half height of the clickable window around a place with resolution 5 hexagons, about 4,500 of them:
-# the map shows about 6° of latitude at its zoom. The window scales with the hexagons, keeping their number.
-PICK_WINDOW_DEG = 4.0
 
 # Diverging blue <-> red around a neutral gray midpoint (light and dark variants), equal steps per arm
 COLD_ARM = ["#104281", "#256abf", "#5598e7", "#9ec5f4"]
@@ -89,34 +83,10 @@ def place_window(
     )
 
 
-def pick_window(latitude: float, longitude: float, resolution: int) -> tuple[float, float, float, float]:
-    """The window of the clickable hexagons of a resolution around a place: each resolution is √7 times finer."""
-    return place_window(latitude, longitude, PICK_WINDOW_DEG * 7 ** ((PICK_RESOLUTION["place"] - resolution) / 2))
-
-
 def hexagon_size(resolution: int) -> str:
     """The size of the hexagons of a resolution, from corner to corner."""
     across = 2 * h3.average_hexagon_edge_length(resolution, unit="km")
     return f"{across:.0f} km" if across >= 10 else f"{across:.1f} km"
-
-
-def pick_cells(
-    bbox: tuple[float, float, float, float] | None, resolution: int, hint: str = "click for its weather"
-) -> pd.DataFrame:
-    """
-    Hexagons covering a bounding box, or the world, with the coordinates of their center and what a click
-    does as tooltip: drawn invisible under the map, they make every point of it clickable.
-    """
-    if bbox is None:
-        cells = [child for cell in h3.get_res0_cells() for child in h3.cell_to_children(cell, resolution)]
-    else:
-        lat_min, lat_max, lon_min, lon_max = bbox
-        lon_min, lon_max = max(lon_min, -180.0), min(lon_max, 180.0)
-        outline = [(lat_min, lon_min), (lat_min, lon_max), (lat_max, lon_max), (lat_max, lon_min)]
-        cells = list(h3.polygon_to_cells(h3.LatLngPoly(outline), resolution))
-    centers = [h3.cell_to_latlng(cell) for cell in cells]
-    tooltips = [f"{lat:.2f}°, {lon:.2f}° · {hint}" for lat, lon in centers]
-    return pd.DataFrame({"h3": cells, "value_text": tooltips})
 
 
 def available_dates(con: duckdb.DuckDBPyConnection) -> list[date]:

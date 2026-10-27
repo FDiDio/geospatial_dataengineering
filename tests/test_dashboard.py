@@ -3,6 +3,7 @@ import io
 import json
 import math
 import os
+import re
 import urllib.error
 import urllib.parse
 from datetime import date, timedelta
@@ -14,7 +15,7 @@ import streamlit as st
 from conftest import fake_archive_fetch
 from streamlit.testing.v1 import AppTest
 
-from dashboard import archive, places, terrain
+from dashboard import archive, maps, places, terrain
 from dashboard.queries import (
     BLUES,
     COLD_ARM,
@@ -24,8 +25,6 @@ from dashboard.queries import (
     colorize,
     hex_to_rgb,
     hexagon_size,
-    pick_cells,
-    pick_window,
     place_window,
     scale_colors,
 )
@@ -339,15 +338,10 @@ def test_a_place_at_coordinates_is_named_by_them():
     assert (place.name, place.short_name, place.kind) == ("45.4600, 9.1900", "45.4600, 9.1900", "coordinates")
 
 
-def test_the_clicked_point_is_the_center_of_the_clicked_hexagon():
-    cell = "851f99cffffffff"
-    state = {"selection": {"indices": {"pick-3": [7]}, "objects": {"pick-3": [{"h3": cell, "value_text": "…"}]}}}
-
-    assert places.clicked_point(state, ["pick-3", "weather-3"]) == pytest.approx(h3.cell_to_latlng(cell))
-    # A selection on layers renamed since: a click already taken
-    assert places.clicked_point(state, ["pick-4", "weather-4"]) is None
-    assert places.clicked_point({"selection": {"indices": {}, "objects": {}}}, ["pick-0"]) is None
-    assert places.clicked_point(None, ["pick-0"]) is None
+def test_the_clicked_point_is_the_last_click_on_the_map():
+    assert maps.clicked_point({"last_clicked": {"lat": 45.46, "lng": 9.19}}) == (45.46, 9.19)
+    assert maps.clicked_point({"last_clicked": None}) is None
+    assert maps.clicked_point(None) is None
 
 
 def test_reverse_geocoding_names_the_point_or_nothing_at_sea(monkeypatch):
@@ -360,44 +354,50 @@ def test_reverse_geocoding_names_the_point_or_nothing_at_sea(monkeypatch):
     assert places.reverse(40.0, -40.0) is None
 
 
-def test_pick_cells_cover_the_world_or_a_window():
-    world = pick_cells(None, 2)
-    assert len(world) == 5882 and world["h3"].is_unique
+def test_grid_cells_cover_the_world_or_a_window():
+    world = maps.grid_cells(None, 1)
+    assert len(world) == len(set(world)) == 842
 
     bbox = (44.46, 46.46, 7.19, 11.19)
-    window = pick_cells(bbox, 5)
-    centers = [h3.cell_to_latlng(cell) for cell in window["h3"]]
-    assert len(window) > 100 and all(h3.get_resolution(cell) == 5 for cell in window["h3"])
+    window = maps.grid_cells(bbox, 5)
+    centers = [h3.cell_to_latlng(cell) for cell in window]
+    assert len(window) > 100 and all(h3.get_resolution(cell) == 5 for cell in window)
     assert all(bbox[0] <= lat <= bbox[1] and bbox[2] <= lon <= bbox[3] for lat, lon in centers)
-    assert window["value_text"][0].endswith("° · click for its weather")
-    assert pick_cells(bbox, 3, "click to go there")["value_text"][0].endswith("° · click to go there")
 
 
-def test_around_a_place_coarser_hexagons_take_the_map_there(monkeypatch, tmp_path):
-    taken = []
-    monkeypatch.setattr(places, "clicked_point", lambda state, layers: taken.append(list(layers)))
-    app = run_app(monkeypatch, tmp_path)
-    app.sidebar.text_input[0].set_value("Zurich").run(timeout=60)
+def test_a_hexagon_across_the_antimeridian_stays_whole():
+    corners = maps.boundary(h3.latlng_to_cell(0.0, 179.99, 2))
+    longitudes = [lon for lon, _ in corners]
 
-    deck = json.loads(app.get("deck_gl_json_chart")[0].proto.json)
-    clickable = [layer for layer in deck["layers"] if layer["id"].endswith("-0") and layer.get("pickable")]
-    hexagons = {layer["id"].removesuffix("-0"): layer["data"] for layer in clickable}
-
-    # The world, the hexagons two sizes coarser than the place's around it, and the fine ones, each drawn over
-    # the coarser: a click takes the topmost
-    assert list(hexagons) == ["world", "near", "pick"]
-    resolutions = {name: {h3.get_resolution(row["h3"]) for row in data} for name, data in hexagons.items()}
-    assert resolutions == {"world": {2}, "near": {5}, "pick": {7}}
-    assert hexagons["near"][0]["value_text"].endswith("click to go there")
-    assert hexagons["pick"][0]["value_text"].endswith("click for its weather")
-    assert "near-0" in taken[-1]
+    # Closed, and east of 180° rather than spread across the world
+    assert corners[0] == corners[-1]
+    assert max(longitudes) > 180 and max(longitudes) - min(longitudes) < 10
 
 
-def test_the_clickable_window_keeps_its_number_of_hexagons_at_every_size():
-    assert pick_window(45.0, 9.0, 5) == place_window(45.0, 9.0, 4.0)
-    assert pick_window(45.0, 9.0, 7)[1] == pytest.approx(45.0 + 4.0 / 7)
-    counts = {resolution: len(pick_cells(pick_window(45.0, 9.0, resolution), resolution)) for resolution in range(3, 8)}
-    assert all(3000 < count < 7000 for count in counts.values()), counts
+@pytest.mark.parametrize("on_phone", [False, True])
+def test_the_map_of_a_place(on_phone):
+    cell = h3.latlng_to_cell(47.37, 8.54, 7)
+    figure = maps.base((47.37, 8.54), 10.3, "light", on_phone)
+    maps.add_grid(figure, h3.grid_disk(cell, maps.RINGS), maps.rgba([40, 50, 70, 45]))
+    maps.add_place(figure, 47.37, 8.54, cell, maps.rgba([42, 120, 214]))
+
+    html = figure.get_root().render()
+    # The patch of hexagons around the place, and its own over them
+    assert len(re.findall(r'"h3": "', html)) == 3 * maps.RINGS * (maps.RINGS + 1) + 1 + 1
+    assert "rgba(40, 50, 70, 0.18)" in html and "rgba(42, 120, 214, 1.00)" in html
+    assert "basemaps.cartocdn.com/gl/positron-gl-style/style.json" in html and "apikey" not in html
+    # On a phone one finger scrolls the page, two move the map
+    assert ("gestureHandling.enable()" in html) == on_phone
+
+
+def test_the_cells_of_a_mart_on_the_map():
+    figure = maps.base((47.0, 8.0), 6.0, "light", False)
+    maps.add_values(figure, [], [], [])  # a day without events: nothing to draw
+    maps.add_values(figure, [h3.latlng_to_cell(47.0, 8.0, 4)], ["31.2 °C"], [[227, 73, 72, 220]])
+
+    html = figure.get_root().render()
+    # The value under the pointer, ° escaped in the JSON of the map
+    assert r"31.2 \u00b0C" in html and "rgba(227, 73, 72, 0.86)" in html
 
 
 def test_hexagon_sizes_from_corner_to_corner():
@@ -534,8 +534,6 @@ def test_dashboard_shows_a_place_without_a_warehouse(monkeypatch, tmp_path):
 
 
 def test_a_place_typed_or_clicked_as_coordinates(monkeypatch, tmp_path):
-    clicks = []
-    monkeypatch.setattr(places, "clicked_point", lambda state, layers: clicks.pop() if clicks else None)
     app = run_app(monkeypatch, tmp_path)
 
     app.sidebar.text_input[0].set_value("47.37, 8.54").run(timeout=60)
@@ -544,12 +542,14 @@ def test_a_place_typed_or_clicked_as_coordinates(monkeypatch, tmp_path):
     assert "Near Zürich, Schweiz" in [caption.value for caption in app.caption]
     assert any("weather model, 47.25° 8.50°" in caption.value for caption in app.caption)
 
-    # A click on the map writes the center of the clicked hexagon in the place field
-    clicks.append((45.46, 9.19))
+    # A click on the map writes its point in the place field, once: the value of the map keeps the last click
+    app.session_state["map"] = {"last_clicked": {"lat": 45.46, "lng": 9.19}}
     app.run(timeout=60)
     assert not app.exception
     assert app.sidebar.text_input[0].value == "45.4600, 9.1900"
     assert app.subheader[0].value == "45.4600, 9.1900"
+    app.sidebar.text_input[0].set_value("Zurich").run(timeout=60)
+    assert app.subheader[0].value == "Zürich"
 
 
 def test_a_failed_server_is_asked_again_and_a_wrong_request_is_not(monkeypatch):
@@ -613,28 +613,27 @@ def test_today_is_a_forecast_left_out_of_the_statistics(monkeypatch, tmp_path):
         assert metrics(app.tabs[1])["Wet days"].endswith(f"of {gone_by}")
 
 
-def test_zoom_buttons_and_hexagon_sizes(monkeypatch, tmp_path):
+def test_recenter_and_hexagon_sizes(monkeypatch, tmp_path):
     app = run_app(monkeypatch, tmp_path)
+    assert app.session_state["view"] == ((25.0, 10.0), 2.0)  # the world
     app.sidebar.text_input[0].set_value("Zurich").run(timeout=60)
-    # Hexagons of 2.8 km by default: the place gets its resolution 7 cell, zoomed in to keep them easy to click
-    fine = 7.5 + 2 * math.log2(math.sqrt(7))
-    assert app.session_state["zoom"] == pytest.approx(fine)
+    # Hexagons of 2.8 km by default: the place gets its resolution 7 cell, zoomed in to keep them as large
+    fine = 8.5 + 2 * math.log2(math.sqrt(7))
+    assert app.session_state["view"] == ((47.37, 8.54), pytest.approx(fine))
     assert any(":material/hexagon: 5 km² hexagon" in markdown.value for markdown in app.markdown)
 
-    def press(label):
-        next(button for button in app.button if button.label == label).click().run(timeout=60)
-        assert not app.exception
-        return app.session_state["zoom"]
-
-    assert [press("Zoom in"), press("Zoom in"), press("Zoom out"), press("Recenter")] == pytest.approx(
-        [fine + 1, fine + 2, fine + 1, fine]
-    )
+    # Recenter draws the map again at the place: a new view, of the same center and zoom
+    views = app.session_state["views"]
+    next(button for button in app.button if button.label == "Recenter").click().run(timeout=60)
+    assert not app.exception
+    assert app.session_state["views"] == views + 1
+    assert app.session_state["view"] == ((47.37, 8.54), pytest.approx(fine))
 
     # Hexagons of 20 km: the resolution 5 cell, and the map zooms out to keep them as large
     app.button_group[0].set_value(5).run(timeout=60)
     assert not app.exception
     assert any(":material/hexagon: 242 km² hexagon" in markdown.value for markdown in app.markdown)
-    assert app.session_state["zoom"] == pytest.approx(7.5)
+    assert app.session_state["view"][1] == pytest.approx(8.5)
 
 
 def test_the_chosen_place_stays_when_the_day_changes(monkeypatch, tmp_path):

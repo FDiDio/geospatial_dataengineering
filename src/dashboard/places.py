@@ -7,11 +7,8 @@ import json
 import re
 import urllib.parse
 import urllib.request
-from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import Any
-
-import h3
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org"
 # The Nominatim usage policy asks for an identifying user agent and at most one request per second:
@@ -100,16 +97,3 @@ def format_dms(latitude: float, longitude: float) -> str:
 def at(latitude: float, longitude: float) -> Place:
     """The place of some coordinates."""
     return Place(format_coordinates(latitude, longitude), latitude, longitude, "coordinates")
-
-
-def clicked_point(state: Mapping[str, Any] | None, layers: Collection[str]) -> tuple[float, float] | None:
-    """
-    The center of the hexagon clicked on one of these layers of the map, from the selection state of
-    st.pydeck_chart, or None. deck.gl reports the clicked object, not the clicked coordinates.
-    """
-    objects = ((state or {}).get("selection") or {}).get("objects") or {}
-    for layer in layers:
-        picked = objects.get(layer)
-        if picked and picked[0].get("h3"):
-            return h3.cell_to_latlng(picked[0]["h3"])
-    return None

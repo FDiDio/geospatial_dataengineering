@@ -17,12 +17,12 @@ import altair as alt
 import duckdb
 import h3
 import pandas as pd
-import pydeck as pdk
 import streamlit as st
+from streamlit_folium import st_folium
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from dashboard import archive, phone, places, queries, terrain
+from dashboard import archive, maps, phone, places, queries, terrain
 from dashboard.queries import DEFAULT_WAREHOUSE, LAYERS, REGIONS, colorize, scale_colors
 
 WORLD = "World"
@@ -38,17 +38,17 @@ ACCENT = {"light": [42, 120, 214], "dark": [57, 135, 229]}
 GRID = {"light": [40, 50, 70, 45], "dark": [220, 225, 235, 40]}
 MUTED = {"light": "#5b6573", "dark": "#a3acb9"}
 CHART_GRID = {"light": "#e9ecf0", "dark": "#273039"}
-# Zoom on a place: its 20 km hexagons about 60 pixels across, easy to click. Each finer resolution of
-# hexagons is √7 times smaller, so the map zooms in by log2(√7) levels to keep them as large.
-PLACE_ZOOM = 7.5
+# Zoom of Leaflet on a place: its 20 km hexagon about 60 pixels across. Each finer resolution of hexagons is
+# √7 times smaller, so the map zooms in by log2(√7) levels to keep them as large.
+PLACE_ZOOM = 8.5
 ZOOM_PER_RESOLUTION = math.log2(math.sqrt(7))
+WORLD_VIEW = ((25.0, 10.0), 2.0)
+# Height of the map, in pixels: on a phone, shorter, so that the page around it is easy to scroll
+MAP_HEIGHT = {"desktop": 580, "phone": 380}
 # Width of a metric tile, in pixels: tiles of a fixed width wrap onto new rows in a narrow window, where
 # columns would squeeze them and Streamlit would cut their labels and values short
 TILE_WIDTH = 220
 MONTHS = list(calendar.month_abbr)[1:]
-# What a click on a clickable hexagon does: the finest ones around a place give its weather, the coarser ones
-# beyond take the map there, among fine ones
-WEATHER, GO = "click for its weather", "click to go there"
 
 theme = getattr(getattr(st.context, "theme", None), "type", None) or "light"
 language = getattr(st.context, "locale", None) or "en"
@@ -121,8 +121,8 @@ def cell_altitude(cell: str) -> terrain.Altitude:
 
 
 @st.cache_data(show_spinner=False)
-def pick_cells(bbox: tuple[float, float, float, float] | None, resolution: int, hint: str = GO) -> pd.DataFrame:
-    return queries.pick_cells(bbox, resolution, hint)
+def grid_cells(bbox: tuple[float, float, float, float] | None, resolution: int) -> list[str]:
+    return maps.grid_cells(bbox, resolution)
 
 
 def measure(value: float | None, unit: str) -> str:
@@ -169,10 +169,6 @@ def versus(value: float, month: pd.Series | None, statistic: str) -> str | None:
     if month is None or pd.isna(value) or pd.isna(month[statistic]):
         return None
     return f"{value - month[statistic]:+.1f} °C vs month"
-
-
-def zoom_by(step: float) -> None:
-    st.session_state["zoom"] = min(max(st.session_state["zoom"] + step, 0.0), 18.0)
 
 
 def recenter() -> None:
@@ -299,17 +295,12 @@ try:
 except duckdb.Error:  # no warehouse yet
     dates = []
 
-# A click on the map selects the invisible hexagon under it: its center becomes the place. While a selection
-# is active, Streamlit dims every other object of the map, and a selection counts only while its layer is on
-# the map: the layers are renamed after each click to clear it. Remounting the map with a new key would clear
-# it too, but each mount takes a WebGL context, and the browser blanks the map after a dozen.
-clicks = st.session_state.setdefault("map_clicks", 0)
-clicked = places.clicked_point(
-    st.session_state.get("map"), [f"pick-{clicks}", f"near-{clicks}", f"weather-{clicks}", f"world-{clicks}"]
-)
-if clicked is not None:
+# A click on the map gives its point, the new place, written in the place field before it is drawn. The value of
+# the map keeps its last click over the runs: a click is taken once.
+clicked = maps.clicked_point(st.session_state.get("map"))
+if clicked is not None and clicked != st.session_state.get("map_click"):
+    st.session_state["map_click"] = clicked
     st.session_state["place_query"] = places.format_coordinates(*clicked)
-    st.session_state["map_clicks"] = clicks = clicks + 1
 
 with st.sidebar:
     st.header(":material/public: Weather")
@@ -397,123 +388,39 @@ if on_map:
     values["color"] = colorize(values["value"], layer, theme)
     values["value_text"] = values["value"].map(lambda v: f"{v:,.1f} {layer.unit}")
 
-# The hexagon of the place, at the resolution of the clickable ones around it
+# The hexagon of the place, of the size chosen above the map
 cell = h3.latlng_to_cell(place.latitude, place.longitude, resolution) if place else None
 
-# The clickable hexagons, each layer over the coarser ones: the whole world in coarse ones, so that a click
-# anywhere is taken even zoomed out; around a place, hexagons two sizes coarser than its own on a window 7 times
-# as large, a click on which moves the place within half of one of them, among fine ones to pick the point
-# exactly; and the fine ones. These cannot follow the view: deck.gl tells Streamlit the clicked hexagon, not the
-# clicked point nor where the map is.
-pickables = [(f"world-{clicks}", pick_cells(None, queries.PICK_RESOLUTION["world"], GO))]
 if place is not None:
     center, zoom = (place.latitude, place.longitude), PLACE_ZOOM + ZOOM_PER_RESOLUTION * (resolution - 5)
-    near = resolution - 2
-    if near > queries.PICK_RESOLUTION["world"]:
-        pickables.append((f"near-{clicks}", pick_cells(queries.pick_window(*center, near), near, GO)))
-    pickables.append((f"pick-{clicks}", pick_cells(queries.pick_window(*center, resolution), resolution, WEATHER)))
 elif bbox is None:
-    center, zoom = (25.0, 10.0), 1.0
+    center, zoom = WORLD_VIEW
 else:
     lat_min, lat_max, lon_min, lon_max = bbox
-    center, zoom = ((lat_min + lat_max) / 2, (lon_min + lon_max) / 2), 3.5
-    pickables.append((f"pick-{clicks}", pick_cells(bbox, queries.PICK_RESOLUTION["area"], GO)))
+    # The area across most of the map: each zoom level halves the degrees it spans
+    center, zoom = ((lat_min + lat_max) / 2, (lon_min + lon_max) / 2), math.log2(360 / (lon_max - lon_min)) + 1.5
 
-# Streamlit moves the map only by the values of its initial view that changed, keeping the view of the user
-# otherwise: a new place, area or hexagon size, or the Recenter button, nudges all of them, so that the map
-# moves there again; the zoom buttons change the zoom alone, around what the map shows
+# Streamlit draws the map again only when its code changes, keeping the view of the visitor otherwise: a new
+# place, area or hexagon size moves it there, and the Recenter button nudges the view, which changes the code
 if (place, bbox, resolution) != st.session_state.get("viewed") or st.session_state.pop("recenter", False):
     st.session_state["viewed"] = (place, bbox, resolution)
     st.session_state["views"] = st.session_state.get("views", 0) + 1
-    st.session_state["zoom"] = zoom
+    st.session_state["view"] = (center, zoom)
+(view_latitude, view_longitude), view_zoom = st.session_state["view"]
 nudge = st.session_state["views"] % 2 * 1e-6
-view = pdk.ViewState(latitude=center[0] + nudge, longitude=center[1] + nudge, zoom=st.session_state["zoom"] + nudge)
-
-accent = ACCENT[theme]
-layers = [
-    # Nearly transparent (fully transparent objects are not pickable) and lit under the pointer; the finest
-    # ones outlined, to show where a click goes. Line widths are clamped in pixels, as for the dot below.
-    pdk.Layer(
-        "H3HexagonLayer",
-        cells,
-        id=layer_id,
-        get_hexagon="h3",
-        get_fill_color=[128, 128, 128, 1],
-        extruded=False,
-        stroked=layer_id.startswith("pick") or (place is None and bbox is None),
-        get_line_color=GRID[theme],
-        get_line_width=1,
-        line_width_min_pixels=1,
-        line_width_max_pixels=1,
-        pickable=True,
-        auto_highlight=True,
-        # The world's hexagons, hundreds of km across, lit lightly: they would cover the map
-        highlight_color=[*accent, 50 if layer_id.startswith("world") and place is not None else 120],
-    )
-    for layer_id, cells in pickables
-]
+figure = maps.base((view_latitude + nudge, view_longitude + nudge), view_zoom, theme, phone.is_phone())
 if on_map:
-    layers.append(
-        pdk.Layer(
-            "H3HexagonLayer",
-            values[["h3", "value_text", "color"]],
-            id=f"weather-{clicks}",
-            get_hexagon="h3",
-            get_fill_color="color",
-            extruded=False,
-            stroked=False,
-            pickable=True,
-            auto_highlight=True,
-            highlight_color=[*accent, 120],
-        )
+    maps.add_values(figure, list(values["h3"]), list(values["value_text"]), list(values["color"]))
+# The hexagons of the place's size around it, or a light grid on the world or the area
+if cell is not None:
+    maps.add_grid(figure, h3.grid_disk(cell, maps.RINGS), maps.rgba(GRID[theme]))
+else:
+    maps.add_grid(
+        figure, grid_cells(bbox, maps.GRID_RESOLUTION["world" if bbox is None else "area"]), maps.rgba(GRID[theme])
     )
-if place is not None:
-    # The hexagon of the place, outlined in the accent, and a white dot with a dark ring on the place: visible
-    # on both ends of every color scale. Sizes are clamped in pixels: the deck.gl of Streamlit draws a radius
-    # in "pixels" units as large as the whole map.
-    layers.append(
-        pdk.Layer(
-            "H3HexagonLayer",
-            [{"h3": cell}],
-            id="cell",
-            get_hexagon="h3",
-            get_fill_color=[*accent, 50],
-            get_line_color=[*accent, 255],
-            get_line_width=2,
-            line_width_min_pixels=2,
-            line_width_max_pixels=2,
-            extruded=False,
-            stroked=True,
-            pickable=False,
-        )
-    )
-    layers.append(
-        pdk.Layer(
-            "ScatterplotLayer",
-            [{"position": [place.longitude, place.latitude]}],
-            id="place",
-            get_position="position",
-            get_radius=6,
-            radius_min_pixels=6,
-            radius_max_pixels=6,
-            get_fill_color=[255, 255, 255],
-            get_line_color=[20, 20, 20],
-            get_line_width=2,
-            line_width_min_pixels=2,
-            line_width_max_pixels=2,
-            stroked=True,
-            pickable=False,
-        )
-    )
+if place is not None and cell is not None:
+    maps.add_place(figure, place.latitude, place.longitude, cell, maps.rgba(ACCENT[theme]))
 
-tooltip_style = {
-    "backgroundColor": "#1c2430" if theme == "light" else "#e6e9ee",
-    "color": "#ffffff" if theme == "light" else "#1c2430",
-    "fontSize": "12px",
-    "padding": "6px 10px",
-    "borderRadius": "8px",
-}
-# The toolbar of the map, on the left: Streamlit shows the toolbar of the chart over its top right corner
 with st.container(horizontal=True, vertical_alignment="bottom", gap="medium"):
     st.segmented_control(
         "Hexagons",
@@ -523,37 +430,23 @@ with st.container(horizontal=True, vertical_alignment="bottom", gap="medium"):
         format_func=queries.hexagon_size,
         key="hexagons",
         disabled=place is None,
-        help="Size of the hexagon of a place and of the clickable ones around it, from corner to corner. "
+        help="Size of the hexagon of a place and of the ones drawn around it, from corner to corner. "
         "The altitude is of the hexagon; the weather comes from a grid of 28 km whatever the size.",
     )
-    with st.container(horizontal=True, width="content"):
-        st.button("Zoom out", icon=":material/zoom_out:", on_click=zoom_by, args=(-1.0,))
-        st.button("Zoom in", icon=":material/zoom_in:", on_click=zoom_by, args=(1.0,))
-        st.button("Recenter", icon=":material/my_location:", on_click=recenter)
+    st.button("Recenter", icon=":material/my_location:", on_click=recenter)
 
-st.pydeck_chart(
-    pdk.Deck(
-        layers=layers,
-        initial_view_state=view,
-        # The layers on every copy of the world the basemap repeats when zoomed out, clickable on each
-        views=[pdk.View(type="MapView", controller=True, repeat=True)],
-        map_provider="carto",
-        map_style="dark" if theme == "dark" else "light",
-        tooltip={"html": f"<b>{layer.label}</b><br/>{{value_text}}<br/><small>{{h3}}</small>", "style": tooltip_style}
-        if on_map
-        else {"text": "{value_text}", "style": tooltip_style},
-    ),
-    height=580,
-    on_select="rerun",
-    selection_mode="single-object",
+# Only a click reruns the page: a pan or a zoom stays in the browser
+st_folium(
+    figure,
     key="map",
+    height=MAP_HEIGHT["phone" if phone.is_phone() else "desktop"],
+    use_container_width=True,
+    returned_objects=["last_clicked"],
+    wrap_longitude=True,
 )
-# The zoom buttons of the map pass their clicks on to the hexagons under them, which would move the place
-ZOOM_BUTTONS = 'div:has(> button[title="Zoom In"]), button[title="Zoom In"], button[title="Zoom Out"]'
-st.html(f"<style>{ZOOM_BUTTONS} {{display: none}}</style>")
 st.caption(
-    ":material/touch_app: Click a hexagon for its weather. Away from the place, a click takes the map there, "
-    "among fine hexagons: a second click picks the point. Zoom with the mouse wheel or two fingers."
+    ":material/touch_app: Click the map for the weather of a point: its hexagon has the size chosen above. "
+    "Zoom with the mouse wheel, the + and − buttons or two fingers."
 )
 
 if on_map:
