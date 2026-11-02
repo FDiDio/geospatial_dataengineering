@@ -56,14 +56,8 @@ HOURLY = {
     "weather_code": "weather_code",  # WMO, see WEATHER
     "is_day": "is_day",
 }
-# The sunlight at the hour, not its mean over the hour before as in the plain variables, in W/m²: on the ground, its
-# direct beam on the ground and across its path, for the feels-like temperature (comfort.py). Asked only where it is
-# shown: Open-Meteo counts each ten variables of a request as a call.
-SUNLIGHT = {
-    "shortwave_radiation_instant": "radiation_wm2",
-    "direct_radiation_instant": "direct_radiation_wm2",
-    "direct_normal_irradiance_instant": "direct_normal_wm2",
-}
+# The fields of an hour that come from the model: is_day is astronomical, given for the hours not published yet
+MODELLED = [column for column in HOURLY.values() if column != "is_day"]
 COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
 
 # The WMO weather codes, which Open-Meteo derives from the clouds, precipitation and snow of a model:
@@ -127,13 +121,12 @@ class Weather:
     timezone: str  # e.g. Europe/Rome
     # date, temperature_max_c, temperature_mean_c, temperature_min_c, precipitation_mm, wind_speed_mean_kmh,
     # wind_speed_max_kmh, wind_gusts_max_kmh, wind_direction_deg (the dominant one), humidity_mean_pct,
-    # humidity_min_pct, humidity_max_pct, cloud_cover_mean_pct, sunshine_h, weather_code (see weather_of_days),
-    # source (one of SOURCES); with the feels-like temperature, feels_like_max_c, feels_like_min_c and
-    # feels_like_shade_max_c
+    # humidity_min_pct, humidity_max_pct, cloud_cover_mean_pct, sunshine_h, feels_like_max_c, feels_like_min_c,
+    # weather_code (see weather_of_days), source (one of SOURCES)
     daily: pd.DataFrame
     # time (in the local time zone), temperature_c, precipitation_mm, wind_speed_kmh, wind_direction_deg,
-    # wind_gusts_kmh, humidity_pct, cloud_cover_pct, sunshine_s, weather_code, is_day, source; with the feels-like
-    # temperature, the SUNLIGHT fields, feels_like_c and feels_like_shade_c (comfort.py)
+    # wind_gusts_kmh, humidity_pct, cloud_cover_pct, sunshine_s, weather_code, is_day, feels_like_c (comfort.py),
+    # source
     hourly: pd.DataFrame
     # The grid point of each model: (latitude, longitude, elevation in m), by source name
     points: dict[str, tuple[float, float, float]] = field(default_factory=dict)
@@ -218,18 +211,10 @@ def weather_of_hours(hours: pd.DataFrame, wet_mm: float) -> float:
     return float(weather_of_days(pd.DataFrame([parts]), wet_mm).iloc[0])
 
 
-# The feels-like temperature of a day: its highest and lowest, and its highest in the shade
-FEELS_LIKE_OF_DAYS = {
-    "feels_like_max_c": ("feels_like_c", "max"),
-    "feels_like_min_c": ("feels_like_c", "min"),
-    "feels_like_shade_max_c": ("feels_like_shade_c", "max"),
-}
-
-
 class RequestLimit(RuntimeError):
     """
-    Open-Meteo refused a request: its free calls of a minute, an hour or a day are used up. It counts each two weeks
-    and each ten variables of a request as a call: a year of a place as 26, 34 with the SUNLIGHT.
+    Open-Meteo refused a request: its free calls of a minute, an hour or a day are used up. It counts a request
+    of more than two weeks as several calls, a year of a place as 26.
     """
 
 
@@ -263,21 +248,16 @@ def get_json(url: str, attempts: int = 3) -> Any:
     raise AssertionError("unreachable")
 
 
-def fetch(
-    latitude: float, longitude: float, start: date, end: date, source: Source = ERA5, feels_like: bool = False
-) -> Weather:
+def fetch(latitude: float, longitude: float, start: date, end: date, source: Source = ERA5) -> Weather:
     """
-    Weather of the local days of a place from start to end (inclusive), from a source, with the feels-like
-    temperature if asked; the days it does not have completely are left out.
+    Weather of the local days of a place from start to end (inclusive), from a source; the days it does not
+    have completely are left out.
 
     Open-Meteo finds the time zone of the place, but shifts all the hours of an answer by the UTC offset
     of today: an hour off on the other side of daylight saving time. So the hours are shifted back to UTC,
     converted to the time zone with its rules of every year, and the local days (23 to 25 hours long)
     are aggregated here.
     """
-    fields = {**HOURLY, **SUNLIGHT} if feels_like else HOURLY
-    # The fields of an hour that come from the model: is_day is astronomical, given for the hours not published yet
-    modelled = [column for column in fields.values() if column != "is_day"]
     params = urllib.parse.urlencode(
         {
             "latitude": latitude,
@@ -285,18 +265,17 @@ def fetch(
             # A local day spans two UTC days
             "start_date": max(start - timedelta(days=1), FIRST_DAY).isoformat(),
             "end_date": (end + timedelta(days=1)).isoformat(),
-            "hourly": ",".join(fields),
+            "hourly": ",".join(HOURLY),
             "models": source.model,
             "timezone": "auto",
         }
     )
     answer = get_json(f"{source.url}?{params}")
-    hourly = pd.DataFrame(answer["hourly"]).rename(columns=fields).dropna(subset=modelled, how="all")
+    hourly = pd.DataFrame(answer["hourly"]).rename(columns=HOURLY).dropna(subset=MODELLED, how="all")
     utc = pd.to_datetime(hourly["time"]) - pd.Timedelta(seconds=answer["utc_offset_seconds"])
     hourly["time"] = utc.dt.tz_localize("UTC").dt.tz_convert(answer["timezone"])
     hourly = hourly[hourly["time"].dt.date.between(start, end)].reset_index(drop=True)
-    if feels_like:
-        hourly = pd.concat([hourly, comfort.feels_like(hourly)], axis=1)
+    hourly["feels_like_c"] = comfort.feels_like(hourly)
 
     # The dominant direction of a day is that of the sum of its hourly winds as vectors: the plain mean of
     # 350° and 10° would be 180°, the south
@@ -326,7 +305,8 @@ def fetch(
         humidity_max_pct=("humidity_pct", "max"),
         cloud_cover_mean_pct=("cloud_cover_pct", "mean"),
         sunshine_s=("sunshine_s", "sum"),
-        **(FEELS_LIKE_OF_DAYS if feels_like else {}),
+        feels_like_max_c=("feels_like_c", "max"),
+        feels_like_min_c=("feels_like_c", "min"),
         daylight_clouds=("daylight_clouds", "mean"),
         daylight_storm_code=("daylight_storm_code", "max"),
         precipitation_code=("precipitation_code", "max"),
@@ -367,21 +347,16 @@ def periods(start: date, end: date, now: pd.Timestamp) -> tuple[Period | None, P
 
 
 def fetch_with_forecast(
-    latitude: float,
-    longitude: float,
-    start: date,
-    end: date,
-    now: pd.Timestamp | None = None,
-    feels_like: bool = False,
+    latitude: float, longitude: float, start: date, end: date, now: pd.Timestamp | None = None
 ) -> Weather:
     """
     Weather of a place from start to end, from ERA5 as far as it goes, then from ECMWF IFS: its recent runs
-    for the days ERA5 has not published yet, and its forecast from now on; with the feels-like temperature if asked.
+    for the days ERA5 has not published yet, and its forecast from now on.
     """
     now = pd.Timestamp.now(tz="UTC") if now is None else now
     era5, ifs = periods(start, end, now)
-    reanalysis = fetch(latitude, longitude, *era5, ERA5, feels_like) if era5 else None
-    operational = fetch(latitude, longitude, *ifs, IFS, feels_like) if ifs else None
+    reanalysis = fetch(latitude, longitude, *era5, ERA5) if era5 else None
+    operational = fetch(latitude, longitude, *ifs, IFS) if ifs else None
     return combine(reanalysis, operational, now)
 
 

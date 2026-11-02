@@ -26,11 +26,11 @@ def make_temperature_df(days, kelvin=283.15):
     return df
 
 
-def fake_archive_fetch(latitude, longitude, start, end, source=None, feels_like=False):
+def fake_archive_fetch(latitude, longitude, start, end, source=None):
     """
     Weather of a place as the Open-Meteo archive gives it: high 25 °C + day of the month, 2 mm on even days,
-    a west wind of 10 km/h + the day of the month modulo 5, gusts of 30 km/h + the day of the month. If asked, an
-    hour feels 2 °C warmer than its temperature by day and 1 °C colder at night, 1 °C warmer in the shade by day.
+    a west wind of 10 km/h + the day of the month modulo 5, gusts of 30 km/h + the day of the month. An hour feels
+    1 °C colder than its temperature for the wind, the warmest of a day 2 °C warmer for the humidity.
     """
     from dashboard.archive import Weather
 
@@ -71,13 +71,9 @@ def fake_archive_fetch(latitude, longitude, start, end, source=None, feels_like=
             "is_day": ((hours.hour >= 7) & (hours.hour < 19)).astype(int),
         }
     )
-    if feels_like:
-        by_day = hourly["is_day"] == 1
-        hourly["feels_like_c"] = hourly["temperature_c"] + np.where(by_day, 2.0, -1.0)
-        hourly["feels_like_shade_c"] = hourly["temperature_c"] + np.where(by_day, 1.0, -1.0)
-        daily["feels_like_max_c"] = daily["temperature_max_c"] + 2
-        daily["feels_like_min_c"] = daily["temperature_min_c"] - 1
-        daily["feels_like_shade_max_c"] = daily["temperature_max_c"] + 1
+    hourly["feels_like_c"] = hourly["temperature_c"] - 1
+    daily["feels_like_max_c"] = daily["temperature_max_c"] + 2
+    daily["feels_like_min_c"] = daily["temperature_min_c"]
     name = "ERA5" if source is None else source.name
     point = (round(latitude * 4) / 4, round(longitude * 4) / 4, 400.0)
     return Weather(*point, "Europe/Zurich", daily.assign(source=name), hourly.assign(source=name), points={name: point})

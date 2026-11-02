@@ -58,7 +58,7 @@ function part(item, drop) {
 function hour(item, drop) {
   const cell = element("div", "hour");
   const feels = element("div", "feels-like");
-  if (item.feels !== "–") feels.append(element("div", "", "feels"), item.feels);
+  if (item.feels) feels.append(element("div", "", "feels"), item.feels);
   cell.append(
     element("div", "over", item.over),
     element("div", "label", item.label),

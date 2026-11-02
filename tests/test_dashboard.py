@@ -175,6 +175,9 @@ def test_local_days_follow_daylight_saving_time(archive_server):
             "humidity_max_pct": 60.0,
             "cloud_cover_mean_pct": 80.0,
             "sunshine_h": pytest.approx(25 * 10 / 60),
+            # The air at 24 °C, the heat index of 48 °C at 50 % of humidity, far off the charts
+            "feels_like_min_c": 24.0,
+            "feels_like_max_c": 96.3,
             # The light rain by day, not the thunderstorm of the night
             "weather_code": 61,
             "source": "ERA5",
@@ -213,10 +216,10 @@ def test_the_icon_of_a_weather_code():
 
 def test_the_forecast_at_a_glance(recorded_fetch):
     now = pd.Timestamp("2026-10-24 10:30", tz="UTC")  # 12:30 in Zurich
-    weather = archive.fetch_with_forecast(47.37, 8.54, date(2026, 10, 1), date(2026, 11, 7), now=now, feels_like=True)
+    weather = archive.fetch_with_forecast(47.37, 8.54, date(2026, 10, 1), date(2026, 11, 7), now=now)
     data = forecast.data(weather, weather, date(2026, 10, 24), now, "#2a78d6", dark=False)
 
-    # Today: its weather now, at 12:00 in Zurich, 21 °C feeling 23 °C in the sun and 22 °C in the shade (conftest)
+    # Today: its weather now, at 12:00 in Zurich, 21 °C feeling 20 °C for the wind (conftest)
     assert data["hero"] == {
         "icon": f"{icons.ANIMATED}overcast-day.svg",
         "sky": "Partly cloudy",
@@ -224,17 +227,16 @@ def test_the_forecast_at_a_glance(recorded_fetch):
         "when": "Now · Saturday 24 October 2026",
         "temperature": "21.0°",
         "low": "",
-        "feels": "Feels like 23.0° · No thermal stress",
-        "lines": ["In the shade 22.0°", "High 49.0° · Low 39.0°"],
+        "feels": "Feels like 20.0° · colder for the wind",
+        "lines": ["High 49.0° · Low 39.0°"],
     }
     # The hours from the current one; the day above the first and above midnight
     hours = data["hours"]
     assert len(hours) == forecast.HOURS and data["hours_title"] == "Next 24 hours"
     assert (hours[0]["over"], hours[0]["label"], hours[1]["label"]) == ("Sat", "Now", "13:00")
     assert hours[12]["label"] == "00:00" and hours[12]["over"] == "Sun" and hours[11]["over"] == ""
-    # 15 + 0.5 °C an hour of the clock, feeling 2 °C warmer by day and 1 °C colder at night; partly cloudy, by day at
-    # noon and by night at midnight
-    assert (hours[0]["temperature"], hours[0]["feels"], hours[0]["rain"]) == ("21.0°", "23.0°", "0.1 mm")
+    # 15 + 0.5 °C an hour of the clock, feeling 1 °C colder; partly cloudy, by day at noon and by night at midnight
+    assert (hours[0]["temperature"], hours[0]["feels"], hours[0]["rain"]) == ("21.0°", "20.0°", "0.1 mm")
     assert (hours[12]["temperature"], hours[12]["feels"]) == ("15.0°", "14.0°")
     assert hours[0]["icon"].endswith("overcast-day.svg") and hours[12]["icon"].endswith("overcast-night.svg")
 
@@ -262,12 +264,12 @@ def test_the_forecast_at_a_glance(recorded_fetch):
 
 def test_another_day_at_a_glance(recorded_fetch):
     now = pd.Timestamp("2026-10-24 10:30", tz="UTC")
-    weather = archive.fetch_with_forecast(47.37, 8.54, date(2026, 10, 1), date(2026, 11, 7), now=now, feels_like=True)
+    weather = archive.fetch_with_forecast(47.37, 8.54, date(2026, 10, 1), date(2026, 11, 7), now=now)
     month = pd.Series({"temperature_max_mean_c": 50.0, "temperature_min_mean_c": 41.5, "temperature_mean_c": np.nan})
     altitude = terrain.Altitude(412.0, 390.0, 870.0, 49)
     data = forecast.data(weather, weather, date(2026, 10, 26), now, "#2a78d6", True, month=month, altitude=altitude)
 
-    # Its high and low, 25 and 15 °C + 26, feeling 2 °C warmer at the warmest and 1 °C colder at the coldest
+    # Its high and low, 25 and 15 °C + 26, the warmest feeling 2 °C warmer
     assert data["hero"] == {
         "icon": f"{icons.ANIMATED}partly-cloudy-day-rain.svg",
         "sky": "Light rain",
@@ -275,8 +277,8 @@ def test_another_day_at_a_glance(recorded_fetch):
         "when": "Monday 26 October 2026",
         "temperature": "51.0°",
         "low": "/ 41.0°",
-        "feels": "Feels like 40.0° to 53.0° · Extreme heat stress at the warmest",
-        "lines": ["Up to 52.0° in the shade"],
+        "feels": "Feels like 41.0° to 53.0° · warmer for the humidity",
+        "lines": [],
     }
     # Its own hours, from midnight
     hours = data["hours"]
@@ -299,8 +301,8 @@ def test_another_day_at_a_glance(recorded_fetch):
     # Against the average high and low of the month, without its missing average
     assert cards["Temperature"]["lines"] == ["Average 46.0°", "vs month: high +1.0°, low -0.5°"]
     assert (cards["Feels like"]["value"], cards["Feels like"]["lines"]) == (
-        "53.0° / 40.0°",
-        ["Extreme heat stress at the warmest", "Up to 52.0° in the shade"],
+        "53.0° / 41.0°",
+        ["Warmer for the humidity"],
     )
     assert cards["Feels like"]["icon"].endswith("thermometer-warmer.svg")
     assert (cards["Precipitation"]["value"], cards["Precipitation"]["lines"]) == ("2.0 mm", ["In 24 of 24 hours"])
@@ -337,76 +339,47 @@ def test_the_beaufort_force_of_a_wind(kmh, force):
     assert forecast.beaufort(kmh) == force
 
 
-@pytest.mark.parametrize(
-    ("low", "high", "stress"),
-    [
-        (12.0, 24.0, "No thermal stress"),
-        (9.0, 25.9, "No thermal stress"),
-        (5.0, 20.0, "Slight cold stress at the coldest"),
-        (-20.0, 30.0, "Strong cold stress at the coldest"),  # further from comfort on the cold side
-        (5.0, 35.0, "Strong heat stress at the warmest"),
-    ],
-)
-def test_the_thermal_stress_of_a_day(low, high, stress):
-    assert forecast.stress_of_day(low, high) == stress
-
-
 def test_the_feels_like_temperature():
-    # The reference of pythermalcomfort: 25 °C, as warm all around, 1 m/s of wind at 10 m and 50 % humidity
-    reference = comfort.utci(np.array([25.0]), np.array([50.0]), np.array([3.6]), np.array([25.0]))
-    assert reference[0] == pytest.approx(24.6, abs=0.05)
+    # The tables of Environment Canada and the NWS: -10 °C in 20 km/h of wind feel -18 °C, 0 °C in 10 km/h -3 °C;
+    # 90 °F at 60 % of humidity feel 100 °F
+    assert comfort.wind_chill(np.array([-10.0, 0.0]), np.array([20.0, 10.0])).round(0).tolist() == [-18.0, -3.0]
+    assert comfort.heat_index(np.array([(90 - 32) * 5 / 9]), np.array([60.0]))[0] * 9 / 5 + 32 == pytest.approx(
+        100, abs=0.5
+    )
     hours = pd.DataFrame(
         {
-            # A sunny noon of November, a clear night, a wet overcast day, an hour not published yet
-            "temperature_c": [14.2, 8.0, 12.0, np.nan],
-            "humidity_pct": [50.0, 82.0, 95.0, np.nan],
-            "cloud_cover_pct": [0.0, 0.0, 100.0, np.nan],
-            "radiation_wm2": [473.0, 0.0, 150.0, np.nan],
-            "direct_radiation_wm2": [385.0, 0.0, 0.0, np.nan],
-            "direct_normal_wm2": [793.0, 0.0, 0.0, np.nan],
-            "wind_speed_kmh": [1.9, 8.3, 20.0, np.nan],
+            # Mild and breezy, cold and windy, cold and calm, hot and humid, a breath of wind, an hour not published
+            "temperature_c": [13.6, 5.0, 5.0, 30.0, 10.0, np.nan],
+            "humidity_pct": [80.0, 80.0, 80.0, 70.0, 90.0, 50.0],
+            "wind_speed_kmh": [20.0, 20.0, 3.0, 5.0, 4.8, 5.0],
         }
     )
     feels = comfort.feels_like(hours)
-    sun, shade = feels["feels_like_c"], feels["feels_like_shade_c"]
-    # The sun warms a person well above the air, the shade less; a clear night and the wind chill
-    assert sun[0] > shade[0] + 5 and shade[0] > hours["temperature_c"][0]
-    assert sun[1] == shade[1] and sun[1] < hours["temperature_c"][1] - 3
-    assert sun[2] == shade[2] and sun[2] < hours["temperature_c"][2]
-    assert np.isnan(sun[3]) and np.isnan(shade[3])
-    # A clear sky is colder than an overcast one, a dry sky than a humid one
-    sky = comfort.sky_longwave(np.array([10.0, 10.0, 10.0]), np.array([50.0, 90.0, 50.0]), np.array([0.0, 0.0, 100.0]))
-    assert 230 < sky[0] < sky[1] < sky[2] < 370
-    assert [comfort.stress(value) for value in (50.0, 30.0, 26.0, 9.0, 8.9, -45.0)] == [
-        "Extreme heat stress",
-        "Moderate heat stress",
-        "Moderate heat stress",
-        "No thermal stress",
-        "Slight cold stress",
-        "Extreme cold stress",
+    assert feels[:5].tolist() == [13.6, 1.1, 5.0, 35.0, 10.0] and np.isnan(feels[5])
+    assert [comfort.why(t, f) for t, f in zip(hours["temperature_c"], feels, strict=True)] == [
+        "",
+        "colder for the wind",
+        "",
+        "warmer for the humidity",
+        "",
+        "",
     ]
-    assert comfort.stress(np.nan) == "–"
+    assert comfort.why(35.0, 33.9) == "cooler for the dry air"
 
 
-def test_the_archive_asks_the_sunlight_of_the_feels_like_temperature(archive_server):
-    answer = archive_answer("2022-07-01", 2, [20.0 + n % 24 * 0.5 for n in range(72)], "Europe/Rome")
-    archive_server["answer"] = answer
-    plain = archive.fetch(45.46, 9.19, date(2022, 7, 2), date(2022, 7, 2))
-    assert "radiation" not in archive_server["url"] and "feels_like_c" not in plain.hourly
+def test_the_archive_gives_the_feels_like_temperature(archive_server):
+    # 20 to 31.5 °C, 10 km/h of wind, 50 or 60 % of humidity: the heat index from 26.7 °C, else the air
+    archive_server["answer"] = archive_answer("2022-07-01", 2, [20.0 + n % 24 * 0.5 for n in range(72)], "Europe/Rome")
+    weather = archive.fetch(45.46, 9.19, date(2022, 7, 2), date(2022, 7, 2))
 
-    hours = len(answer["hourly"]["time"])
-    sunlight = {"shortwave_radiation_instant": 500.0, "direct_radiation_instant": 400.0,
-                "direct_normal_irradiance_instant": 700.0}  # fmt: skip
-    answer["hourly"].update({name: [value] * hours for name, value in sunlight.items()})
-    weather = archive.fetch(45.46, 9.19, date(2022, 7, 2), date(2022, 7, 2), feels_like=True)
-
-    assert all(name in archive_server["url"] for name in sunlight)
-    expected = comfort.feels_like(weather.hourly)
-    assert weather.hourly["feels_like_c"].tolist() == expected["feels_like_c"].tolist()
-    day = weather.daily.iloc[0]
-    assert day["feels_like_max_c"] == expected["feels_like_c"].max()
-    assert day["feels_like_min_c"] == expected["feels_like_c"].min()
-    assert day["feels_like_shade_max_c"] == expected["feels_like_shade_c"].max()
+    hours, day = weather.hourly, weather.daily.iloc[0]
+    assert hours["feels_like_c"].tolist() == comfort.feels_like(hours).tolist()
+    mild = hours["temperature_c"] < comfort.HEAT_INDEX_C
+    assert (hours.loc[mild, "feels_like_c"] == hours.loc[mild, "temperature_c"]).all()
+    assert (day["feels_like_min_c"], day["feels_like_max_c"]) == (
+        hours["feels_like_c"].min(),
+        hours["feels_like_c"].max(),
+    )
 
 
 def test_the_weather_of_a_part_of_a_day():
@@ -478,9 +451,9 @@ def recorded_fetch(monkeypatch):
     """archive.fetch replaced by the fake archive, recording the source and the days of each request."""
     calls = []
 
-    def fetch(latitude, longitude, start, end, source=archive.ERA5, feels_like=False):
+    def fetch(latitude, longitude, start, end, source=archive.ERA5):
         calls.append((source.name, start, end))
-        return fake_archive_fetch(latitude, longitude, start, end, source, feels_like)
+        return fake_archive_fetch(latitude, longitude, start, end, source)
 
     monkeypatch.setattr(archive, "fetch", fetch)
     return calls
@@ -754,8 +727,8 @@ def test_dashboard_shows_a_place_without_a_warehouse(monkeypatch, tmp_path):
         "when": "Friday 15 July 2022",
         "temperature": "40.0°",
         "low": "/ 30.0°",
-        "feels": "Feels like 29.0° to 42.0° · Very strong heat stress at the warmest",
-        "lines": ["Up to 41.0° in the shade"],
+        "feels": "Feels like 30.0° to 42.0° · warmer for the humidity",
+        "lines": [],
     }
     # Its own hours, not the next ones of today
     assert glance["hours_title"] == "Friday 15 July, hour by hour" and len(glance["hours"]) == 24
@@ -791,11 +764,11 @@ def test_dashboard_shows_a_place_without_a_warehouse(monkeypatch, tmp_path):
     assert metrics(year_tab)["Wet days"] == "179 of 365"  # the even days: 15 a month, 14 in February
     hours, days, months = (frame.value for frame in app.dataframe)
     assert len(days) == 31 and list(days.columns[:4]) == ["Day", "Sky", "High", "Average"]
-    assert days.set_index("Day").iloc[14][["Feels like high", "Feels like low"]].tolist() == [42.0, 29.0]
+    assert days.set_index("Day").iloc[14][["Feels like high", "Feels like low"]].tolist() == [42.0, 30.0]
     assert list(days["Sky"][:2]) == ["🌤️ Mainly clear", "🌦️ Light rain"]
     assert len(months) == 12 and list(months.columns[:4]) == ["Month", "Average high", "Average low", "Average"]
     assert months.set_index("Month").loc["Jul", "Average high"] == 41.0
-    assert len(hours) == 24 and list(hours.columns[2:5]) == ["Temperature", "Feels like", "In the shade"]
+    assert len(hours) == 24 and list(hours.columns[2:4]) == ["Temperature", "Feels like"]
 
 
 def test_a_place_typed_or_clicked_as_coordinates(monkeypatch, tmp_path):
@@ -855,10 +828,10 @@ def test_a_request_over_the_limit_says_why_at_once(monkeypatch):
 
 
 def test_the_past_shows_when_the_forecast_fails(monkeypatch, tmp_path):
-    def fetch(latitude, longitude, start, end, source=archive.ERA5, feels_like=False):
+    def fetch(latitude, longitude, start, end, source=archive.ERA5):
         if source == archive.IFS:
             raise urllib.error.URLError("forecast server down")
-        return fake_archive_fetch(latitude, longitude, start, end, source, feels_like)
+        return fake_archive_fetch(latitude, longitude, start, end, source)
 
     app = run_app(monkeypatch, tmp_path, fetch)
     app.sidebar.text_input[0].set_value("Zurich")
@@ -909,7 +882,7 @@ def test_the_forecast_follows_the_day_of_the_page(monkeypatch, tmp_path):
     # The popup of the map sums up that day too, with how it feels (conftest)
     lines = component_data(app, "weather_map")["place"]["lines"]
     n = tomorrow.day
-    assert lines[0] == f"{tomorrow:%a %d %b %Y}" and f"Feels like {14.0 + n:.1f} to {27.0 + n:.1f} °C" in lines
+    assert lines[0] == f"{tomorrow:%a %d %b %Y}" and f"Feels like {15.0 + n:.1f} to {27.0 + n:.1f} °C" in lines
 
 
 def test_recenter_and_hexagon_sizes(monkeypatch, tmp_path):
@@ -952,9 +925,9 @@ def test_the_chosen_place_stays_when_the_day_changes(monkeypatch, tmp_path):
 
 
 def test_a_day_published_up_to_the_evening_has_no_daily_values(monkeypatch, tmp_path):
-    def fetch_up_to_19(latitude, longitude, start, end, source=None, feels_like=False):
+    def fetch_up_to_19(latitude, longitude, start, end, source=None):
         """The archive west of Greenwich: the hours of the last day stop at 19:00, so that day is left out."""
-        weather = fake_archive_fetch(latitude, longitude, start, end, source, feels_like)
+        weather = fake_archive_fetch(latitude, longitude, start, end, source)
         hours = weather.hourly["time"]
         hourly = weather.hourly[(hours.dt.date < end) | (hours.dt.hour <= 19)]
         return dataclasses.replace(weather, hourly=hourly, daily=weather.daily[weather.daily["date"].dt.date < end])

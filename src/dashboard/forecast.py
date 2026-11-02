@@ -25,8 +25,6 @@ PARTS = [("Night", 0), ("Morning", 6), ("Afternoon", 12), ("Evening", 18)]
 WET_PART_MM = 0.5
 # The least precipitation of an hour that a rain gauge measures
 WET_HOUR_MM = 0.1
-# The feels-like temperature in the shade is worth showing this much below the one in the sun
-SHADE_C = 0.5
 # The Beaufort scale of the WMO: the least speed of each force from 1, in m/s, and its name
 BEAUFORT = [(0.3, "Light air"), (1.6, "Light breeze"), (3.4, "Gentle breeze"), (5.5, "Moderate breeze"),
             (8.0, "Fresh breeze"), (10.8, "Strong breeze"), (13.9, "Near gale"), (17.2, "Gale"), (20.8, "Strong gale"),
@@ -35,9 +33,9 @@ WIND_HELP = "Wind at 10 m above the ground, the mean of the hourly speeds"
 SUNSHINE_HELP = "Hours with direct sunlight, of more than 120 W/m² as the WMO defines sunshine"
 HUMIDITY_HELP = "Relative humidity at 2 m above the ground, the mean of the hourly values"
 FEELS_LIKE_HELP = (
-    "UTCI, the Universal Thermal Climate Index of ECMWF and Copernicus: the temperature that would feel the same "
-    "with a light breeze, 50 % humidity and no sun, from the temperature, humidity, wind and sunlight of each hour, "
-    "in the sun when it shines"
+    "The highest and lowest feels-like temperature of the hours, as weather apps give it (US National Weather "
+    "Service, Environment Canada): the wind chill at 10 °C or less with some wind, the heat index from 26.7 °C, "
+    "else the air temperature"
 )
 ALTITUDE_HELP = (
     "Mean of the altitudes of 49 points spread over the hexagon of the place, from the Copernicus 90 m elevation "
@@ -128,12 +126,16 @@ def beaufort(kmh: float) -> tuple[int, str]:
     return force, "Calm" if force == 0 else BEAUFORT[force - 1][1]
 
 
-def stress_of_day(low: float, high: float) -> str:
-    """The thermal stress of a day from its lowest and highest feels-like: the one further from comfort."""
-    hot, cold = high - comfort.COMFORT[1], comfort.COMFORT[0] - low
-    if hot < 0 and cold <= 0:
-        return comfort.stress(high)
-    return f"{comfort.stress(high)} at the warmest" if hot >= cold else f"{comfort.stress(low)} at the coldest"
+def why_of_day(day_weather: pd.Series) -> str:
+    """
+    Why the feels-like temperature of a day differs from its own at its coldest and its warmest, e.g. "colder for the
+    wind", or "" when it does not.
+    """
+    reasons = [
+        comfort.why(day_weather[temperature], day_weather.get(feels, np.nan))
+        for temperature, feels in [("temperature_min_c", "feels_like_min_c"), ("temperature_max_c", "feels_like_max_c")]
+    ]
+    return ", ".join(dict.fromkeys(reason for reason in reasons if reason))
 
 
 def hour_items(hourly: pd.DataFrame, from_now: bool) -> list[dict[str, Any]]:
@@ -142,6 +144,7 @@ def hour_items(hourly: pd.DataFrame, from_now: bool) -> list[dict[str, Any]]:
     for index, hour in enumerate(hourly.to_dict("records")):
         by_day = hour["is_day"] == 1
         emoji, label = archive.sky(hour["weather_code"], by_day)
+        feels = hour.get("feels_like_c", np.nan)
         items.append(
             {
                 # The day above its first hour, and above midnight
@@ -150,7 +153,8 @@ def hour_items(hourly: pd.DataFrame, from_now: bool) -> list[dict[str, Any]]:
                 "icon": icons.url(hour["weather_code"], by_day),
                 "sky": f"{emoji} {label}",
                 "temperature": degrees(hour["temperature_c"]),
-                "feels": degrees(hour.get("feels_like_c")),
+                # Only when it differs from the temperature
+                "feels": degrees(feels) if comfort.why(hour["temperature_c"], feels) else "",
                 "rain": precipitation(hour["precipitation_mm"]),
             }
         )
@@ -217,14 +221,14 @@ def part_items(hours: pd.DataFrame) -> list[dict[str, Any]]:
 def hero(day: date, day_weather: pd.Series | None, now: pd.Series | None) -> dict[str, Any] | None:
     """
     The head of the day: its weather now when it is today (now, its current hour), else its sky and temperatures,
-    with how they feel, in the sun and in the shade; None without either.
+    with how they feel and why; None without either.
     """
     if now is not None:
         by_day = now["is_day"] == 1
         emoji, label = archive.sky(now["weather_code"], by_day)
-        sun, shade = now.get("feels_like_c"), now.get("feels_like_shade_c")
-        shaded = pd.notna(sun) and pd.notna(shade) and sun - shade >= SHADE_C
-        lines = [f"In the shade {degrees(shade)}"] if shaded else []
+        feels = now.get("feels_like_c", np.nan)
+        why = comfort.why(now["temperature_c"], feels)
+        lines = []
         if day_weather is not None:
             lines.append(
                 f"High {degrees(day_weather['temperature_max_c'])} · Low {degrees(day_weather['temperature_min_c'])}"
@@ -236,16 +240,14 @@ def hero(day: date, day_weather: pd.Series | None, now: pd.Series | None) -> dic
             "when": f"Now · {day:%A %d %B %Y}",
             "temperature": degrees(now["temperature_c"]),
             "low": "",
-            "feels": "" if pd.isna(sun) else f"Feels like {degrees(sun)} · {comfort.stress(sun)}",
+            "feels": "" if pd.isna(feels) else f"Feels like {degrees(feels)}" + (f" · {why}" if why else ""),
             "lines": lines,
         }
     if day_weather is None:
         return None
     emoji, label = archive.sky(day_weather["weather_code"])
     low, high = day_weather.get("feels_like_min_c", np.nan), day_weather.get("feels_like_max_c", np.nan)
-    shade = day_weather.get("feels_like_shade_max_c", np.nan)
-    known = pd.notna(low) and pd.notna(high)
-    shaded = known and pd.notna(shade) and high - shade >= SHADE_C
+    why = why_of_day(day_weather)
     return {
         "icon": icons.url(day_weather["weather_code"], animated=True),
         "sky": label,
@@ -253,8 +255,10 @@ def hero(day: date, day_weather: pd.Series | None, now: pd.Series | None) -> dic
         "when": f"{day:%A %d %B %Y}",
         "temperature": degrees(day_weather["temperature_max_c"]),
         "low": f"/ {degrees(day_weather['temperature_min_c'])}",
-        "feels": f"Feels like {degrees(low)} to {degrees(high)} · {stress_of_day(low, high)}" if known else "",
-        "lines": [f"Up to {degrees(shade)} in the shade"] if shaded else [],
+        "feels": ""
+        if pd.isna(low) or pd.isna(high)
+        else f"Feels like {degrees(low)} to {degrees(high)}" + (f" · {why}" if why else ""),
+        "lines": [],
     }
 
 
@@ -303,18 +307,15 @@ def details(
         )
         feels_low, feels_high = day_weather.get("feels_like_min_c", np.nan), day_weather.get("feels_like_max_c", np.nan)
         if pd.notna(feels_low) and pd.notna(feels_high):
-            warmer = pd.notna(high) and feels_high >= high
-            shade = day_weather.get("feels_like_shade_max_c", np.nan)
-            shaded = pd.notna(shade) and feels_high - shade >= SHADE_C
+            why = why_of_day(day_weather)
+            # A thermometer going down in the cold wind, up in the muggy heat
+            thermometer = "thermometer-colder" if "colder" in why else "thermometer-warmer" if why else "thermometer"
             cards.append(
                 card(
-                    f"{icons.STATIC}thermometer-{'warmer' if warmer else 'colder'}.svg",
+                    f"{icons.STATIC}{thermometer}.svg",
                     "Feels like",
                     f"{degrees(feels_high)} / {degrees(feels_low)}",
-                    [
-                        stress_of_day(feels_low, feels_high),
-                        f"Up to {degrees(shade)} in the shade" if shaded else "",
-                    ],
+                    [why.capitalize() if why else "As the air: no cold wind, no muggy heat"],
                     FEELS_LIKE_HELP,
                 )
             )

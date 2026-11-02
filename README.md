@@ -264,7 +264,7 @@ A **place**, searched by name (e.g. `Milano`, geocoded with OpenStreetMap [Nomin
 as coordinates (`45.46, 9.19`) or clicked on the map, gets its weather on **any day since 1940**, Weather Underground
 style, with nothing to ingest. It reads as a weather app ([forecast.py](src/dashboard/forecast.py), a Streamlit
 component): first the day of the page, **now** when it is today, with its sky, its temperature, high and low, and how
-warm or cold it **feels**, in the sun and in the shade; its night, morning, afternoon and evening; its hours, the next
+warm or cold it **feels** and why; its night, morning, afternoon and evening; its hours, the next
 24 from now when it is today; the next 10 days, on bars from their low to their high, a day clicked or tapped becoming
 the day of the page; then the day in cards: its temperatures against the averages of its month, how they feel,
 precipitation and the hours it falls, wind (mean speed at 10 m, dominant direction from the vector sum of the hours,
@@ -275,17 +275,13 @@ day, fog, else the daylight cloud cover), and so does that of each part of it. T
 per WMO code by day and by night: static in the rows and the charts, animated beside the day and on the map, with their
 emoji in the tables.
 
-The **feels-like temperature** is the Universal Thermal Climate Index (UTCI) of ECMWF and Copernicus (ERA5-HEAT),
-computed in [comfort.py](src/dashboard/comfort.py) with [thermofeel](https://github.com/ecmwf/thermofeel), the library
-of ECMWF: the temperature that would strain the body as much with a light breeze, 50 % humidity and no sun, from the
-air temperature, humidity, wind at 10 m and the radiation a person gets, its mean radiant temperature. That one
-follows Di Napoli et al. (2020), as ERA5-HEAT does, from the sunlight of the same models at the hour (Open-Meteo's
-`*_instant` radiation: global, direct on the ground and across the beam); Open-Meteo has no long-wave radiation, so the
-sky's is estimated from the temperature, humidity and cloud cover (Prata 1996, Unsworth and Monteith 1975) and the
-ground's from the air, which reflects a fifth of the sunlight (no snow in ERA5 there). In the shade the direct beam
-is left out. A sunny, calm noon of November can feel 8 °C warmer than the air, a clear, breezy night several degrees
-colder: Open-Meteo's own apparent temperature (Steadman's) hardly sees the sun. The three radiation variables are
-asked by the page only: Open-Meteo counts each ten variables of a request as a call, and the agent does without.
+The **feels-like temperature** ([comfort.py](src/dashboard/comfort.py)) is the one weather apps give, of the US
+National Weather Service and Environment Canada: in the cold, the wind chill (at 10 °C or less, with more than 4.8 km/h
+of wind at 10 m); in the heat, the heat index (from 26.7 °C, the NWS algorithm: Rothfusz's regression with its
+adjustments); in between, the air temperature itself, to a tenth of a degree as Open-Meteo gives it. The page says why
+it differs: colder for the wind, warmer for the humidity. A first version used UTCI, the thermal comfort index of
+ERA5-HEAT, with the sunlight of the models: it measures the strain of the body, and by day ran 5 to 8 °C above the air
+even under clouds, nothing like a forecast's feels-like.
 
 Then its month, with the averages of the highs, lows and
 means, the extremes, total precipitation, wet days, mean wind, strongest gust and a table of every day; its year,

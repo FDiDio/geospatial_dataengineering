@@ -73,23 +73,19 @@ def name_of(latitude: float, longitude: float, language: str) -> str | None:
     return places.reverse(latitude, longitude, language)
 
 
-# The fields of an hour the page asks, with the sunlight of the feels-like temperature
-FIELDS = (*archive.HOURLY, *archive.SUNLIGHT)
-
-
 @st.cache_data(ttl=86400, show_spinner="Loading the weather of the place…")
 def load_reanalysis(latitude: float, longitude: float, period: archive.Period, fields: tuple) -> archive.Weather:
     """
-    ERA5 for a place, with the feels-like temperature. The fields fetched are part of the cache key: a server still
-    running when they change does not serve its cached weather without them.
+    ERA5 for a place. The fields fetched are part of the cache key: a server still running when they
+    change does not serve its cached weather without them.
     """
-    return archive.fetch(latitude, longitude, *period, archive.ERA5, feels_like=True)
+    return archive.fetch(latitude, longitude, *period, archive.ERA5)
 
 
 @st.cache_data(ttl=3600, show_spinner="Loading the forecast of the place…")
 def load_operational(latitude: float, longitude: float, period: archive.Period, fields: tuple) -> archive.Weather:
-    """ECMWF IFS for a place, with the feels-like temperature, its forecast renewed a few times a day."""
-    return archive.fetch(latitude, longitude, *period, archive.IFS, feels_like=True)
+    """ECMWF IFS for a place, its forecast renewed a few times a day."""
+    return archive.fetch(latitude, longitude, *period, archive.IFS)
 
 
 def load_weather(
@@ -107,7 +103,7 @@ def load_weather(
         if period is None:
             continue
         try:
-            weathers[source.name] = loader(latitude, longitude, period, FIELDS)
+            weathers[source.name] = loader(latitude, longitude, period, tuple(archive.HOURLY))
         except (OSError, ValueError) as error:
             errors.append(f"{'historical data' if source == archive.ERA5 else 'recent data and forecast'}: {error}")
     if not weathers:
@@ -602,7 +598,8 @@ if place is not None and cell is not None:
             st.caption(
                 f"{day:%A %d %B %Y}, local time ({weather.timezone}). Values of the nearest point of the weather "
                 f"model, {lat:.2f}° {lon:.2f}°, the temperatures brought to the altitude of the place, "
-                f"{elevation:.0f} m. Feels like: UTCI, from the temperature, humidity, wind and sunlight of each hour."
+                f"{elevation:.0f} m. Feels like: the wind chill in the cold wind, the heat index in the heat, else "
+                "the air temperature."
             )
 
     if weather is not None:
@@ -958,7 +955,6 @@ if place is not None and cell is not None:
                         "sky",
                         "temperature_c",
                         "feels_like_c",
-                        "feels_like_shade_c",
                         "precipitation_mm",
                         "humidity_pct",
                         "cloud_cover_pct",
@@ -974,7 +970,6 @@ if place is not None and cell is not None:
                         "sky": "Sky",
                         "temperature_c": "Temperature",
                         "feels_like_c": "Feels like",
-                        "feels_like_shade_c": "In the shade",
                         "precipitation_mm": "Precipitation",
                         "humidity_pct": "Humidity",
                         "cloud_cover_pct": "Clouds",
@@ -989,7 +984,6 @@ if place is not None and cell is not None:
                 column_config={
                     "Temperature": TEMPERATURE_COLUMN,
                     "Feels like": TEMPERATURE_COLUMN,
-                    "In the shade": TEMPERATURE_COLUMN,
                     "Precipitation": st.column_config.NumberColumn(format="%.2f mm"),
                     "Humidity": PERCENT_COLUMN,
                     "Clouds": PERCENT_COLUMN,
