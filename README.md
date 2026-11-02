@@ -262,18 +262,35 @@ so it never blocks the dbt runs.
 
 A **place**, searched by name (e.g. `Milano`, geocoded with OpenStreetMap [Nominatim](https://nominatim.org)), typed
 as coordinates (`45.46, 9.19`) or clicked on the map, gets its weather on **any day since 1940**, Weather Underground
-style, with nothing to ingest. First comes its **forecast at a glance**, as a weather app shows it
-([forecast.py](src/dashboard/forecast.py), a Streamlit component): the next 24 hours and the next 10 days, each with its
-icon, temperatures and precipitation, the days on bars from their low to their high; a day, clicked or tapped, becomes
-the day of the page. The icons are [Meteocons](https://github.com/basmilius/weather-icons) by Bas Milius (MIT,
-[icons.py](src/dashboard/icons.py)), one per WMO code by day and by night: static in the rows and the charts,
-animated beside the day and on the map, with their emoji in the tables. Then the sky of the day (from the WMO weather codes of the hours: a thunderstorm
-by daylight, the precipitation of a wet day, fog, else the daylight cloud cover), its high, low, average,
-precipitation, sunshine, humidity and wind (mean speed at 10 m, dominant direction from the vector sum of the
-hours, strongest gust); its month, with the averages of the highs, lows and
+style, with nothing to ingest. It reads as a weather app ([forecast.py](src/dashboard/forecast.py), a Streamlit
+component): first the day of the page, **now** when it is today, with its sky, its temperature, high and low, and how
+warm or cold it **feels**, in the sun and in the shade; its night, morning, afternoon and evening; its hours, the next
+24 from now when it is today; the next 10 days, on bars from their low to their high, a day clicked or tapped becoming
+the day of the page; then the day in cards: its temperatures against the averages of its month, how they feel,
+precipitation and the hours it falls, wind (mean speed at 10 m, dominant direction from the vector sum of the hours,
+an arrow where it blows, strongest gust, Beaufort force), sunshine and clouds, humidity, and the altitude of the place.
+The sky of a day comes from the WMO weather codes of its hours (a thunderstorm by daylight, the precipitation of a wet
+day, fog, else the daylight cloud cover), and so does that of each part of it. The icons are
+[Meteocons](https://github.com/basmilius/weather-icons) by Bas Milius (MIT, [icons.py](src/dashboard/icons.py)), one
+per WMO code by day and by night: static in the rows and the charts, animated beside the day and on the map, with their
+emoji in the tables.
+
+The **feels-like temperature** is the Universal Thermal Climate Index (UTCI) of ECMWF and Copernicus (ERA5-HEAT),
+computed in [comfort.py](src/dashboard/comfort.py) with [thermofeel](https://github.com/ecmwf/thermofeel), the library
+of ECMWF: the temperature that would strain the body as much with a light breeze, 50 % humidity and no sun, from the
+air temperature, humidity, wind at 10 m and the radiation a person gets, its mean radiant temperature. That one
+follows Di Napoli et al. (2020), as ERA5-HEAT does, from the sunlight of the same models at the hour (Open-Meteo's
+`*_instant` radiation: global, direct on the ground and across the beam); Open-Meteo has no long-wave radiation, so the
+sky's is estimated from the temperature, humidity and cloud cover (Prata 1996, Unsworth and Monteith 1975) and the
+ground's from the air, which reflects a fifth of the sunlight (no snow in ERA5 there). In the shade the direct beam
+is left out. A sunny, calm noon of November can feel 8 °C warmer than the air, a clear, breezy night several degrees
+colder: Open-Meteo's own apparent temperature (Steadman's) hardly sees the sun. The three radiation variables are
+asked by the page only: Open-Meteo counts each ten variables of a request as a call, and the agent does without.
+
+Then its month, with the averages of the highs, lows and
 means, the extremes, total precipitation, wet days, mean wind, strongest gust and a table of every day; its year,
-with the same statistics month by month; and the hourly temperature, precipitation and wind, with arrows pointing
-where it blows, in local time. Its tabs open on the day, then come its month and its year. Its H3 cell is outlined on the map, with its **mean altitude** and range, sampled at 49 points of the Copernicus
+with the same statistics month by month; and the hourly temperature and how it feels, precipitation and wind, with
+arrows pointing where it blows, in local time. Its tabs open on the day, then come its month and its year. Its H3 cell is outlined on the map, with its **mean altitude** and range, sampled at 49 points of the Copernicus
 90 m elevation model (Open-Meteo elevation API).
 
 The map is a Streamlit component, [weather_map.js](src/dashboard/weather_map.js) with
@@ -286,7 +303,9 @@ the point is the place, the hexagon's size its **Hexagons** size, and the map st
 on the point and, with its weather in, sums up the day there, with a button down to the full weather of the place
 below the map, which people did not notice. The map lives as long
 as the page: each run gives it new layers, and it moves only to a searched place, a chosen hexagon size, from 138 to
-2.8 km across (the area of the altitude; the weather stays the 28 km ERA5 grid), or on **Recenter**. CARTO's raster
+2.8 km across (the area of the altitude: the weather is that of the point itself, from the nearest point of the
+model, 28 km apart for ERA5 and 9 km for IFS, its temperature brought by Open-Meteo to the altitude of the point with a
+90 m elevation model; a smaller hexagon would not make it any finer), or on **Recenter**. CARTO's raster
 tiles now print "API KEY REQUIRED" across the map, its vector tiles do not. The theme is in [.streamlit/config.toml](.streamlit/config.toml). On phones, narrower than 640 px,
 the map is shorter, one finger scrolls the page over it and two move it, and the tiles come two a row. The sidebar, with the
 search, starts closed there behind », as a line on the page says, and closes again once a place is chosen, to show its weather. The page speaks plainly: the models are named in the credits only. It comes on demand from the ERA5 archive of

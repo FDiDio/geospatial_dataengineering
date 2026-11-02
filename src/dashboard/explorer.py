@@ -26,8 +26,9 @@ from dashboard.queries import DEFAULT_WAREHOUSE, LAYERS, REGIONS, colorize, scal
 
 WORLD = "World"
 SERIES_COLOR = {"light": "#2a78d6", "dark": "#3987e5"}
-# The second series of a chart, the gusts beside the wind: orange against the blue, dashed besides
-GUST_COLOR = {"light": "#c4501f", "dark": "#f08a5f"}
+# The second series of a chart, the gusts beside the wind, the feels-like beside the temperature: orange against the
+# blue, dashed besides
+SECOND_COLOR = {"light": "#c4501f", "dark": "#f08a5f"}
 # The sunshine, in amber, and the clouds, in gray
 SUN_COLOR = {"light": "#d99a06", "dark": "#f5b82e"}
 CLOUD_COLOR = {"light": "#9aa5b1", "dark": "#6b7684"}
@@ -72,19 +73,23 @@ def name_of(latitude: float, longitude: float, language: str) -> str | None:
     return places.reverse(latitude, longitude, language)
 
 
+# The fields of an hour the page asks, with the sunlight of the feels-like temperature
+FIELDS = (*archive.HOURLY, *archive.SUNLIGHT)
+
+
 @st.cache_data(ttl=86400, show_spinner="Loading the weather of the place…")
 def load_reanalysis(latitude: float, longitude: float, period: archive.Period, fields: tuple) -> archive.Weather:
     """
-    ERA5 for a place. The fields fetched are part of the cache key: a server still running when they
-    change does not serve its cached weather without them.
+    ERA5 for a place, with the feels-like temperature. The fields fetched are part of the cache key: a server still
+    running when they change does not serve its cached weather without them.
     """
-    return archive.fetch(latitude, longitude, *period, archive.ERA5)
+    return archive.fetch(latitude, longitude, *period, archive.ERA5, feels_like=True)
 
 
 @st.cache_data(ttl=3600, show_spinner="Loading the forecast of the place…")
 def load_operational(latitude: float, longitude: float, period: archive.Period, fields: tuple) -> archive.Weather:
-    """ECMWF IFS for a place, its forecast renewed a few times a day."""
-    return archive.fetch(latitude, longitude, *period, archive.IFS)
+    """ECMWF IFS for a place, with the feels-like temperature, its forecast renewed a few times a day."""
+    return archive.fetch(latitude, longitude, *period, archive.IFS, feels_like=True)
 
 
 def load_weather(
@@ -102,7 +107,7 @@ def load_weather(
         if period is None:
             continue
         try:
-            weathers[source.name] = loader(latitude, longitude, period, tuple(archive.HOURLY))
+            weathers[source.name] = loader(latitude, longitude, period, FIELDS)
         except (OSError, ValueError) as error:
             errors.append(f"{'historical data' if source == archive.ERA5 else 'recent data and forecast'}: {error}")
     if not weathers:
@@ -146,21 +151,6 @@ def tile(label: str, value: str, **kwargs) -> None:
     st.metric(label, value, border=True, width=TILE_WIDTH, **kwargs)
 
 
-# The average of the month each value of a day compares to
-STATISTIC_OF_DAY = {
-    "temperature_max_c": "temperature_max_mean_c",
-    "temperature_min_c": "temperature_min_mean_c",
-    "temperature_mean_c": "temperature_mean_c",
-}
-
-
-def versus(value: float, month: pd.Series | None, statistic: str) -> str | None:
-    """The difference of a value of a day to the average of its month, as the delta of a metric."""
-    if month is None or pd.isna(value) or pd.isna(month[statistic]):
-        return None
-    return f"{value - month[statistic]:+.1f} °C vs month"
-
-
 def take_click() -> None:
     """
     A click on the map: its point is the new place, written in the place field before it is drawn, and its
@@ -191,7 +181,7 @@ def popup(
 ) -> tuple[str, list[str], str | None]:
     """
     The title, lines and icon of the popup of the place on the map: its name, the day, its sky and its main values,
-    beside the animated icon of its weather.
+    how warm or cold it feels among them, beside the animated icon of its weather.
     """
     title = near.split(",")[0] if near else place.short_name
     lines = [f"{day:%a %d %b %Y}"]
@@ -205,8 +195,11 @@ def popup(
         lines += [
             label if icon else f"{emoji} {label}",
             f"High {measure(today['temperature_max_c'], '°C')} · Low {measure(today['temperature_min_c'], '°C')}",
-            f"Precipitation {measure(today['precipitation_mm'], 'mm')}",
         ]
+        feels_low, feels_high = today.get("feels_like_min_c"), today.get("feels_like_max_c")
+        if pd.notna(feels_low) and pd.notna(feels_high):
+            lines.append(f"Feels like {feels_low:.1f} to {feels_high:.1f} °C")
+        lines.append(f"Precipitation {measure(today['precipitation_mm'], 'mm')}")
         return title, lines, icon
     return title, lines, None
 
@@ -326,9 +319,7 @@ PRECIPITATION_COLUMN = st.column_config.NumberColumn(format="%.1f mm")
 WIND_COLUMN = st.column_config.NumberColumn(format="%.0f km/h")
 SUNSHINE_COLUMN = st.column_config.NumberColumn(format="%.1f h")
 PERCENT_COLUMN = st.column_config.NumberColumn(format="%.0f %%")
-WIND_HELP = "Wind at 10 m above the ground, the mean of the hourly speeds"
-SUNSHINE_HELP = "Hours with direct sunlight, of more than 120 W/m² as the WMO defines sunshine"
-HUMIDITY_HELP = "Relative humidity at 2 m above the ground, the mean of the hourly values"
+WIND_HELP, SUNSHINE_HELP, HUMIDITY_HELP = forecast.WIND_HELP, forecast.SUNSHINE_HELP, forecast.HUMIDITY_HELP
 
 try:
     dates = load(warehouse, "available_dates")
@@ -453,6 +444,7 @@ weather: archive.Weather | None = None
 weather_errors: list[str] = []
 upcoming: archive.Weather | None = None
 today = None
+month: pd.Series | None = None
 near = None
 utc_now = pd.Timestamp.now(tz="UTC")
 if place is not None and cell is not None:
@@ -490,8 +482,9 @@ with st.container(horizontal=True, vertical_alignment="bottom", gap="medium"):
         key="hexagons",
         disabled=place is None,
         help="Size of the hexagon of a place, from corner to corner, where the map zooms to; a click on the map takes "
-        "the size of its hexagon. The altitude is of the hexagon, the weather comes from a grid of 28 km whatever the "
-        "size.",
+        "the size of its hexagon. The altitude is of the hexagon. The weather is of the point itself, whatever the "
+        "size: from the nearest point of the weather model (28 km apart for the past, 9 km for the forecast), its "
+        "temperature brought to the altitude of the point.",
     )
     st.button("Recenter", icon=":material/my_location:", on_click=recenter)
 
@@ -565,26 +558,6 @@ if place is not None and cell is not None:
             st.code(f"{place.latitude:.6f}, {place.longitude:.6f}", language=None, width="content")
             st.markdown(f":blue-badge[:material/location_on: {places.format_dms(place.latitude, place.longitude)}]")
 
-        # The next hours and days first, as a weather app shows them; a day clicked there becomes the day of the page
-        if upcoming is not None:
-            forecast.show(
-                forecast.data(upcoming, utc_now, day, SERIES_COLOR[theme], theme == "dark", phone.is_phone()),
-                key="forecast",
-                on_day=take_day,
-            )
-        else:
-            st.caption("The forecast of the next days is unavailable, try again in a moment.")
-
-        # The day of the page: the animated icon of its weather beside its name and date
-        sky_icon = (
-            "" if today is None else icons.image(today["weather_code"], 72, animated=True, shadow=theme == "light")
-        )
-        sky_label = "" if today is None else archive.sky(today["weather_code"])[1]
-        st.html(
-            f'<div style="display: flex; align-items: center; gap: 12px; margin-top: 8px">{sky_icon}<div>'
-            f"<div style=\"font: 600 1.6rem 'Chakra Petch', sans-serif\">{sky_label}</div>"
-            f'<div style="opacity: 0.75">{day:%A %d %B %Y}</div></div></div>'
-        )
         badges = [f":gray-badge[:material/hexagon: {h3.cell_area(cell, 'km^2'):,.0f} km² hexagon]"]
         if weather is not None:
             badges.append(f":gray-badge[:material/schedule: {weather.timezone}]")
@@ -600,68 +573,36 @@ if place is not None and cell is not None:
         elif weather is not None and selected.empty:
             st.info(
                 f"This day is not complete yet: the data reach {published['time'].max():%H:%M} here, so its "
-                "high, low and precipitation would be wrong. Its hours so far are in the Day tab."
+                "high, low and precipitation would be wrong. Its hours so far are below and in the Day tab."
             )
 
-        with st.container(horizontal=True):
-            if today is not None:
-                for label, column in [
-                    ("High", "temperature_max_c"),
-                    ("Low", "temperature_min_c"),
-                    ("Average", "temperature_mean_c"),
-                ]:
-                    tile(
-                        label,
-                        measure(today[column], "°C"),
-                        delta=versus(today[column], month, STATISTIC_OF_DAY[column]),
-                        delta_color="off",
-                    )
-                tile("Precipitation", measure(today["precipitation_mm"], "mm"))
-                gust = today["wind_gusts_max_kmh"]
-                tile(
-                    "Wind",
-                    measure(today["wind_speed_mean_kmh"], "km/h"),
-                    delta=None
-                    if pd.isna(gust)
-                    else f"from {archive.compass(today['wind_direction_deg'])} · gusts {gust:.0f} km/h",
-                    delta_color="off",
-                    delta_arrow="off",
-                    help=f"{WIND_HELP}, with the direction it mostly blows from and the strongest gust",
-                )
-                clouds = today["cloud_cover_mean_pct"]
-                tile(
-                    "Sunshine",
-                    measure(today["sunshine_h"], "h"),
-                    delta=None if pd.isna(clouds) else f"clouds {clouds:.0f} %",
-                    delta_color="off",
-                    delta_arrow="off",
-                    help=f"{SUNSHINE_HELP}, and the mean cloud cover of the day",
-                )
-                tile(
-                    "Humidity",
-                    measure(today["humidity_mean_pct"], "%"),
-                    delta=f"{today['humidity_min_pct']:.0f}–{today['humidity_max_pct']:.0f} %",
-                    delta_color="off",
-                    delta_arrow="off",
-                    help=f"{HUMIDITY_HELP}, with the lowest and highest",
-                )
-            tile(
-                "Mean altitude",
-                "–" if altitude is None else f"{altitude.mean:,.0f} m",
-                delta=None if altitude is None else f"{altitude.min:,.0f}–{altitude.max:,.0f} m",
-                delta_color="off",
-                delta_arrow="off",
-                help="Mean of the altitudes of points about 2.5 km apart in the hexagon of the place, "
-                "from the Copernicus 90 m elevation model, with their lowest and highest; the sea counts as 0 m",
-            )
+        # The day of the page as a weather app shows it: now when it is today, its parts and hours, the next days, a
+        # day clicked there becoming the day of the page, and its details
+        at_a_glance = forecast.data(
+            upcoming,
+            weather,
+            day,
+            utc_now,
+            SERIES_COLOR[theme],
+            theme == "dark",
+            phone.is_phone(),
+            month=month,
+            altitude=altitude,
+        )
+        if at_a_glance is not None:
+            forecast.show(at_a_glance, key="forecast", on_day=take_day)
+        if at_a_glance is None or not at_a_glance["days"]:
+            st.caption("The forecast of the next days is unavailable, try again in a moment.")
         if weather is not None:
-            # The grid point of the model of the day: the forecast comes from ECMWF IFS
+            # The grid point of the model of the day: the forecast comes from ECMWF IFS. Open-Meteo brings its
+            # temperatures to the altitude of the place.
             model = archive.ERA5.name if today is None else today["source"]
             model = archive.IFS.name if model == archive.FORECAST else model
             lat, lon, elevation = weather.points.get(model, (weather.latitude, weather.longitude, weather.elevation))
             st.caption(
                 f"{day:%A %d %B %Y}, local time ({weather.timezone}). Values of the nearest point of the weather "
-                f"model, {lat:.2f}° {lon:.2f}°, {elevation:.0f} m above sea level."
+                f"model, {lat:.2f}° {lon:.2f}°, the temperatures brought to the altitude of the place, "
+                f"{elevation:.0f} m. Feels like: UTCI, from the temperature, humidity, wind and sunlight of each hour."
             )
 
     if weather is not None:
@@ -705,6 +646,8 @@ if place is not None and cell is not None:
                         alt.Tooltip("temperature_max_c:Q", format=".1f", title="High °C"),
                         alt.Tooltip("temperature_mean_c:Q", format=".1f", title="Average °C"),
                         alt.Tooltip("temperature_min_c:Q", format=".1f", title="Low °C"),
+                        alt.Tooltip("feels_like_max_c:Q", format=".1f", title="Feels like, highest °C"),
+                        alt.Tooltip("feels_like_min_c:Q", format=".1f", title="Feels like, lowest °C"),
                         alt.Tooltip("precipitation_mm:Q", format=".1f", title="Precipitation mm"),
                         alt.Tooltip("sunshine_h:Q", format=".1f", title="Sunshine h"),
                         alt.Tooltip("humidity_mean_pct:Q", format=".0f", title="Humidity %"),
@@ -724,6 +667,8 @@ if place is not None and cell is not None:
                             "temperature_max_c",
                             "temperature_mean_c",
                             "temperature_min_c",
+                            "feels_like_max_c",
+                            "feels_like_min_c",
                             "precipitation_mm",
                             "sunshine_h",
                             "humidity_mean_pct",
@@ -740,6 +685,8 @@ if place is not None and cell is not None:
                             "temperature_max_c": "High",
                             "temperature_mean_c": "Average",
                             "temperature_min_c": "Low",
+                            "feels_like_max_c": "Feels like high",
+                            "feels_like_min_c": "Feels like low",
                             "precipitation_mm": "Precipitation",
                             "sunshine_h": "Sunshine",
                             "humidity_mean_pct": "Humidity",
@@ -756,6 +703,8 @@ if place is not None and cell is not None:
                         "High": TEMPERATURE_COLUMN,
                         "Average": TEMPERATURE_COLUMN,
                         "Low": TEMPERATURE_COLUMN,
+                        "Feels like high": TEMPERATURE_COLUMN,
+                        "Feels like low": TEMPERATURE_COLUMN,
                         "Precipitation": PRECIPITATION_COLUMN,
                         "Sunshine": SUNSHINE_COLUMN,
                         "Humidity": PERCENT_COLUMN,
@@ -857,7 +806,7 @@ if place is not None and cell is not None:
             )
             repeated = hours["hour"].duplicated(keep=False)
             hours.loc[repeated, "hour"] = hours.loc[repeated, "label"]
-            plotted = hours[["hour", "temperature_c", "precipitation_mm", "icon", "sky"]]
+            plotted = hours[["hour", "temperature_c", "feels_like_c", "precipitation_mm", "icon", "sky"]]
             hour = alt.X("hour:O", sort=None, title=f"Hour ({weather.timezone})", axis=alt.Axis(labelAngle=0))
             # Today, a dashed rule at the current hour, the forecast on its right
             local_now = pd.Timestamp.now(tz=weather.timezone)
@@ -869,27 +818,48 @@ if place is not None and cell is not None:
                 return chart + now.encode(x="hour:O") if marks_now else chart
 
             charts = st.columns(2)
+            # The temperature, solid, under the icon of the weather of each hour, and how it feels, dashed
+            temperatures = plotted.melt(
+                id_vars=["hour", "icon", "sky"],
+                value_vars=["temperature_c", "feels_like_c"],
+                var_name="series",
+                value_name="celsius",
+            )
+            names = ["Temperature", "Feels like"]
+            temperatures["series"] = temperatures["series"].map(
+                dict(zip(["temperature_c", "feels_like_c"], names, strict=True))
+            )
             temperature = (
-                alt.Chart(plotted)
-                .mark_line(strokeWidth=2, color=SERIES_COLOR[theme], point=alt.OverlayMarkDef(size=64))
+                alt.Chart(temperatures)
+                .mark_line(strokeWidth=2, point=alt.OverlayMarkDef(size=48))
                 .encode(
                     x=hour,
                     # Room above the highest point for its icon
-                    y=alt.Y("temperature_c:Q", title="°C", scale=alt.Scale(zero=False, padding=20)),
+                    y=alt.Y("celsius:Q", title="°C", scale=alt.Scale(zero=False, padding=20)),
+                    color=alt.Color(
+                        "series:N",
+                        scale=alt.Scale(domain=names, range=[SERIES_COLOR[theme], SECOND_COLOR[theme]]),
+                        legend=alt.Legend(title=None, orient="top", symbolType="stroke"),
+                    ),
+                    strokeDash=alt.StrokeDash(
+                        "series:N", scale=alt.Scale(domain=names, range=[[1, 0], [5, 4]]), legend=None
+                    ),
                     tooltip=[
                         alt.Tooltip("hour:O", title="Hour"),
                         alt.Tooltip("sky:N", title="Sky"),
-                        alt.Tooltip("temperature_c:Q", format=".1f", title="°C"),
+                        alt.Tooltip("series:N", title=" "),
+                        alt.Tooltip("celsius:Q", format=".1f", title="°C"),
                     ],
                 )
             )
             images = (
-                alt.Chart(plotted)
+                alt.Chart(temperatures[temperatures["series"] == names[0]])
                 .mark_image(width=22, height=22, yOffset=-16)
-                .encode(x=hour, y="temperature_c:Q", url="icon:N")
+                .encode(x=hour, y="celsius:Q", url="icon:N")
             )
             charts[0].altair_chart(
-                styled(with_now(temperature + images), 220, "Hourly weather and temperature"), width="stretch"
+                styled(with_now(temperature + images), 260, "Hourly weather, temperature and how it feels"),
+                width="stretch",
             )
             precipitation = (
                 alt.Chart(plotted)
@@ -903,7 +873,7 @@ if place is not None and cell is not None:
                     ],
                 )
             )
-            charts[1].altair_chart(styled(with_now(precipitation), 200, "Hourly precipitation"), width="stretch")
+            charts[1].altair_chart(styled(with_now(precipitation), 240, "Hourly precipitation"), width="stretch")
 
             # The wind, solid, and the gusts, dashed, with arrows on the wind pointing where it blows: a ↓ for a
             # wind from the north, turned clockwise by its direction
@@ -923,7 +893,7 @@ if place is not None and cell is not None:
                     y=alt.Y("kmh:Q", title="km/h"),
                     color=alt.Color(
                         "series:N",
-                        scale=alt.Scale(domain=names, range=[SERIES_COLOR[theme], GUST_COLOR[theme]]),
+                        scale=alt.Scale(domain=names, range=[SERIES_COLOR[theme], SECOND_COLOR[theme]]),
                         legend=alt.Legend(title=None, orient="top", symbolType="stroke"),
                     ),
                     strokeDash=alt.StrokeDash(
@@ -987,6 +957,8 @@ if place is not None and cell is not None:
                         "label",
                         "sky",
                         "temperature_c",
+                        "feels_like_c",
+                        "feels_like_shade_c",
                         "precipitation_mm",
                         "humidity_pct",
                         "cloud_cover_pct",
@@ -1001,6 +973,8 @@ if place is not None and cell is not None:
                         "label": "Hour",
                         "sky": "Sky",
                         "temperature_c": "Temperature",
+                        "feels_like_c": "Feels like",
+                        "feels_like_shade_c": "In the shade",
                         "precipitation_mm": "Precipitation",
                         "humidity_pct": "Humidity",
                         "cloud_cover_pct": "Clouds",
@@ -1014,6 +988,8 @@ if place is not None and cell is not None:
                 hide_index=True,
                 column_config={
                     "Temperature": TEMPERATURE_COLUMN,
+                    "Feels like": TEMPERATURE_COLUMN,
+                    "In the shade": TEMPERATURE_COLUMN,
                     "Precipitation": st.column_config.NumberColumn(format="%.2f mm"),
                     "Humidity": PERCENT_COLUMN,
                     "Clouds": PERCENT_COLUMN,
