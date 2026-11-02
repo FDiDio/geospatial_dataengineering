@@ -133,15 +133,29 @@ function layers(state) {
   return drawn;
 }
 
-// The popup of the place: a title, lines of text and, once its weather is in, a button down to the card of the place
-function popupContent(data, title, lines, button) {
+// The popup of the place: a title, lines of text beside the icon of its weather and, once its weather is in, a button
+// down to the card of the place
+function popupContent(data, title, lines, button, icon) {
   const content = document.createElement("div");
-  for (const [className, text] of [["title", title], ...lines.map((line) => ["line", line])]) {
-    const row = document.createElement("div");
-    row.className = className;
-    row.textContent = text;
-    content.append(row);
+  const heading = document.createElement("div");
+  heading.className = "title";
+  heading.textContent = title;
+  const body = document.createElement("div");
+  body.className = "body";
+  if (icon) {
+    const image = document.createElement("img");
+    Object.assign(image, { className: "icon", src: icon, alt: "" });
+    body.append(image);
   }
+  const text = document.createElement("div");
+  for (const line of lines) {
+    const row = document.createElement("div");
+    row.className = "line";
+    row.textContent = line;
+    text.append(row);
+  }
+  body.append(text);
+  content.append(heading, body);
   if (button) {
     const details = document.createElement("button");
     details.className = "details";
@@ -243,11 +257,14 @@ export default async function (component) {
   }
   // The popup opens again when its place or its text changes; closed by the visitor, it stays closed until then
   const { place } = data;
-  const shown = place && JSON.stringify([place.lat, place.lng, place.title, place.lines, data.dark]);
+  const shown = place && JSON.stringify([place.lat, place.lng, place.title, place.lines, place.icon, data.dark]);
   if (shown !== state.shown) {
     state.shown = shown;
-    if (place) showPopup(state, [place.lng, place.lat], popupContent(data, place.title, place.lines, true));
-    else state.popup?.remove();
+    if (place) {
+      showPopup(state, [place.lng, place.lat], popupContent(data, place.title, place.lines, true, place.icon));
+    } else {
+      state.popup?.remove();
+    }
   }
   state.draw();
   return () => {

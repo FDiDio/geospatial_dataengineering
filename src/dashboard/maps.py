@@ -37,22 +37,25 @@ CSS = """
 .weather-map {width: 100%; border-radius: 0.75rem; overflow: hidden}
 .weather-map .maplibregl-popup {z-index: 3}
 .weather-popup .maplibregl-popup-content {
-  padding: 10px 14px 12px; border-radius: 10px; font: 14px/1.4 "Source Sans Pro", sans-serif;
+  padding: 10px 14px 12px; border-radius: 10px; font: 14px/1.4 "IBM Plex Sans", sans-serif;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
 }
 .weather-popup .title {font-weight: 700; font-size: 15px; padding-right: 14px}
+.weather-popup .body {display: flex; align-items: center; gap: 8px}
+.weather-popup .icon {width: 56px; height: 56px; flex: none; filter: drop-shadow(0 1px 1.5px rgba(28, 36, 48, 0.35))}
+.weather-popup.dark .icon {filter: none}
 .weather-popup .line {margin-top: 2px}
-.weather-popup .muted {opacity: 0.7; font-size: 13px}
 .weather-popup button.details {
   margin-top: 8px; width: 100%; padding: 6px 10px; border: none; border-radius: 6px; color: #fff;
-  font: 600 14px "Source Sans Pro", sans-serif; cursor: pointer;
+  font: 600 14px "IBM Plex Sans", sans-serif; cursor: pointer;
 }
 .weather-popup .maplibregl-popup-close-button {font-size: 18px; padding: 0 6px; color: inherit}
-.weather-popup.dark .maplibregl-popup-content {background: #262730; color: #fafafa}
-.weather-popup.dark[class*="anchor-top"] .maplibregl-popup-tip {border-bottom-color: #262730}
-.weather-popup.dark[class*="anchor-bottom"] .maplibregl-popup-tip {border-top-color: #262730}
-.weather-popup.dark.maplibregl-popup-anchor-left .maplibregl-popup-tip {border-right-color: #262730}
-.weather-popup.dark.maplibregl-popup-anchor-right .maplibregl-popup-tip {border-left-color: #262730}
+.weather-popup .maplibregl-popup-content {color: #1c2430}
+.weather-popup.dark .maplibregl-popup-content {background: #181e26; color: #e6e9ee}
+.weather-popup.dark[class*="anchor-top"] .maplibregl-popup-tip {border-bottom-color: #181e26}
+.weather-popup.dark[class*="anchor-bottom"] .maplibregl-popup-tip {border-top-color: #181e26}
+.weather-popup.dark.maplibregl-popup-anchor-left .maplibregl-popup-tip {border-right-color: #181e26}
+.weather-popup.dark.maplibregl-popup-anchor-right .maplibregl-popup-tip {border-left-color: #181e26}
 """
 
 MAP = st.components.v2.component(
@@ -80,15 +83,15 @@ def data(
     phone: bool,
     place: tuple[float, float, str] | None = None,
     values: Sequence[Mapping[str, Any]] = (),
-    popup: tuple[str, Sequence[str]] = ("", ()),
+    popup: tuple[str, Sequence[str], str | None] = ("", (), None),
 ) -> dict[str, Any]:
     """
     What the map draws: the basemap of the theme, the colors of the grid and the accent, the view and its number,
-    the place (latitude, longitude, hexagon) with the title and lines of its popup, and the cells of a mart (h3,
-    color, text).
+    the place (latitude, longitude, hexagon) with the title, lines and weather icon of its popup, and the cells of
+    a mart (h3, color, text).
     """
     (latitude, longitude), zoom = view
-    title, lines = popup
+    title, lines, icon = popup
     return {
         "style": STYLES[theme],
         "dark": theme == "dark",
@@ -99,7 +102,7 @@ def data(
         "phone": phone,
         "place": None
         if place is None
-        else {"lat": place[0], "lng": place[1], "cell": place[2], "title": title, "lines": list(lines)},
+        else {"lat": place[0], "lng": place[1], "cell": place[2], "title": title, "lines": list(lines), "icon": icon},
         "values": list(values),
     }
 

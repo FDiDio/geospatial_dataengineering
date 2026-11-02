@@ -21,7 +21,7 @@ import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from dashboard import archive, maps, phone, places, queries, terrain
+from dashboard import archive, forecast, icons, maps, phone, places, queries, terrain
 from dashboard.queries import DEFAULT_WAREHOUSE, LAYERS, REGIONS, colorize, scale_colors
 
 WORLD = "World"
@@ -87,14 +87,15 @@ def load_operational(latitude: float, longitude: float, period: archive.Period, 
     return archive.fetch(latitude, longitude, *period, archive.IFS)
 
 
-def load_weather(latitude: float, longitude: float, year: int) -> tuple[archive.Weather | None, list[str]]:
+def load_weather(
+    latitude: float, longitude: float, first: date, last: date, now: pd.Timestamp
+) -> tuple[archive.Weather | None, list[str]]:
     """
-    Weather of a place over a year: ERA5, then ECMWF IFS up to the end of its forecast, with the errors of
-    the sources that failed. Each source is cached on its own: one failing does not hide the other, and the
-    failure is not cached, so that the next run asks again.
+    Weather of a place from its first to its last day: ERA5, then ECMWF IFS up to the end of its forecast, with the
+    errors of the sources that failed. Each source is cached on its own: one failing does not hide the other, and
+    the failure is not cached, so that the next run asks again.
     """
-    now = pd.Timestamp.now(tz="UTC")
-    era5, ifs = archive.periods(date(year, 1, 1), min(date(year, 12, 31), archive.last_forecast_day()), now)
+    era5, ifs = archive.periods(first, last, now)
     weathers: dict[str, archive.Weather] = {}
     errors = []
     for source, period, loader in [(archive.ERA5, era5, load_reanalysis), (archive.IFS, ifs, load_operational)]:
@@ -174,14 +175,24 @@ def take_click() -> None:
         st.session_state["map_clicked"] = True
 
 
+def take_day() -> None:
+    """A click on a day of the forecast: it becomes the day of the page, in the day field before it is drawn."""
+    chosen = forecast.clicked((st.session_state.get("forecast") or {}).get("day"))
+    if chosen is not None:
+        st.session_state["day"] = chosen
+
+
 def recenter() -> None:
     st.session_state["recenter"] = True
 
 
 def popup(
     place: places.Place, near: str | None, weather: archive.Weather | None, today: pd.Series | None, day: date
-) -> tuple[str, list[str]]:
-    """The title and lines of the popup of the place on the map: its name, the day, its sky and its main values."""
+) -> tuple[str, list[str], str | None]:
+    """
+    The title, lines and icon of the popup of the place on the map: its name, the day, its sky and its main values,
+    beside the animated icon of its weather.
+    """
     title = near.split(",")[0] if near else place.short_name
     lines = [f"{day:%a %d %b %Y}"]
     if weather is None:
@@ -189,13 +200,15 @@ def popup(
     elif today is None:
         lines.append("This day is not complete yet")
     else:
-        icon, label = archive.sky(today["weather_code"])
+        icon = icons.url(today["weather_code"], animated=True)
+        emoji, label = archive.sky(today["weather_code"])
         lines += [
-            f"{icon} {label}",
+            label if icon else f"{emoji} {label}",
             f"High {measure(today['temperature_max_c'], '°C')} · Low {measure(today['temperature_min_c'], '°C')}",
             f"Precipitation {measure(today['precipitation_mm'], 'mm')}",
         ]
-    return title, lines
+        return title, lines, icon
+    return title, lines, None
 
 
 def show_statistics(statistics: pd.Series) -> None:
@@ -246,8 +259,12 @@ def show_period_charts(
         )
     )
     if "icon" in data:
-        icons = alt.Chart(data).mark_text(dy=-14, fontSize=15).encode(x=axis, y=f"{high}:Q", text="icon:N")
-        temperature = temperature + icons
+        images = (
+            alt.Chart(data)
+            .mark_image(width=24, height=24, yOffset=-15)
+            .encode(x=axis, y=f"{high}:Q", url="icon:N", tooltip=tooltip)
+        )
+        temperature = temperature + images
     st.altair_chart(styled(temperature + marker, 240, titles[0]), width="stretch")
     precipitation = (
         alt.Chart(data)
@@ -346,9 +363,11 @@ with st.sidebar:
             place = matches[0] if len(matches) == 1 else st.selectbox("Matches", matches, format_func=lambda p: p.label)
             if place is not None:
                 st.caption(f":material/location_on: {place.latitude:.6f}, {place.longitude:.6f}")
+    # Its default in the session, where a click on a day of the forecast writes too (take_day)
+    st.session_state.setdefault("day", dates[-1] if dates else date.today())
     day = st.date_input(
         "Day",
-        value=dates[-1] if dates else date.today(),
+        key="day",
         min_value=archive.FIRST_DAY,
         max_value=archive.last_forecast_day(),
         help="A place has the weather of any day since 1940 and the forecast of the next two weeks; "
@@ -366,7 +385,8 @@ with st.sidebar:
     bbox = queries.place_window(place.latitude, place.longitude) if place else REGIONS.get(area)
     st.caption(
         "Weather: ERA5 reanalysis (Copernicus), then ECMWF IFS for the last days and the forecast, via "
-        "Open-Meteo · Altitude: Copernicus DEM 90 m · Places: © OpenStreetMap contributors"
+        "Open-Meteo · Altitude: Copernicus DEM 90 m · Places: © OpenStreetMap contributors · Icons: Meteocons by "
+        "Bas Milius"
     )
     # On a phone the sidebar, open for the search, covers the page: it closes once a new place is chosen, to show
     # its weather
@@ -427,13 +447,24 @@ if (place, bbox, resolution) != st.session_state.get("viewed") or recentered:
         st.session_state["views"] = st.session_state.get("views", 0) + 1
         st.session_state["view"] = view
 
-# The weather of the place, before the map: its popup sums it up
+# The weather of the place, before the map: its popup sums it up. Its year, and its next days from yesterday in UTC,
+# the day before the first day of any time zone: from the year when it holds them, without asking again.
 weather: archive.Weather | None = None
 weather_errors: list[str] = []
+upcoming: archive.Weather | None = None
 today = None
 near = None
+utc_now = pd.Timestamp.now(tz="UTC")
 if place is not None and cell is not None:
-    weather, weather_errors = load_weather(place.latitude, place.longitude, day.year)
+    year_end = min(date(day.year, 12, 31), archive.last_forecast_day())
+    weather, weather_errors = load_weather(place.latitude, place.longitude, date(day.year, 1, 1), year_end, utc_now)
+    first_upcoming = (utc_now - pd.Timedelta(days=1)).date()
+    if weather is not None and first_upcoming.year == day.year and year_end == archive.last_forecast_day():
+        upcoming = weather
+    else:
+        upcoming, _ = load_weather(
+            place.latitude, place.longitude, first_upcoming, archive.last_forecast_day(), utc_now
+        )
     if place.kind == "coordinates":
         try:
             near = name_of(place.latitude, place.longitude, language)
@@ -484,7 +515,7 @@ maps.show(
         on_phone,
         place=None if place is None or cell is None else (place.latitude, place.longitude, cell),
         values=cells,
-        popup=popup(place, near, weather, today, day) if place is not None else ("", ()),
+        popup=popup(place, near, weather, today, day) if place is not None else ("", (), None),
     ),
     key="map",
     on_click=take_click,
@@ -534,15 +565,32 @@ if place is not None and cell is not None:
             st.code(f"{place.latitude:.6f}, {place.longitude:.6f}", language=None, width="content")
             st.markdown(f":blue-badge[:material/location_on: {places.format_dms(place.latitude, place.longitude)}]")
 
+        # The next hours and days first, as a weather app shows them; a day clicked there becomes the day of the page
+        if upcoming is not None:
+            forecast.show(
+                forecast.data(upcoming, utc_now, day, SERIES_COLOR[theme], theme == "dark", phone.is_phone()),
+                key="forecast",
+                on_day=take_day,
+            )
+        else:
+            st.caption("The forecast of the next days is unavailable, try again in a moment.")
+
+        # The day of the page: the animated icon of its weather beside its name and date
+        sky_icon = (
+            "" if today is None else icons.image(today["weather_code"], 72, animated=True, shadow=theme == "light")
+        )
+        sky_label = "" if today is None else archive.sky(today["weather_code"])[1]
+        st.html(
+            f'<div style="display: flex; align-items: center; gap: 12px; margin-top: 8px">{sky_icon}<div>'
+            f"<div style=\"font: 600 1.6rem 'Chakra Petch', sans-serif\">{sky_label}</div>"
+            f'<div style="opacity: 0.75">{day:%A %d %B %Y}</div></div></div>'
+        )
         badges = [f":gray-badge[:material/hexagon: {h3.cell_area(cell, 'km^2'):,.0f} km² hexagon]"]
         if weather is not None:
             badges.append(f":gray-badge[:material/schedule: {weather.timezone}]")
         if today is not None:
             badges.insert(0, SOURCE_BADGES[today["source"]])
         st.markdown(" ".join(badges))
-        if today is not None:
-            icon, label = archive.sky(today["weather_code"])
-            st.markdown(f"### {icon} {label}")
 
         if weather_errors:
             missing = "Weather of the place unavailable" if weather is None else "Part of the weather is missing"
@@ -640,7 +688,7 @@ if place is not None and cell is not None:
                 month_days = month_days.assign(
                     day=month_days["date"].dt.day,
                     direction=month_days["wind_direction_deg"].map(archive.compass),
-                    icon=[icon for icon, _ in skies],
+                    icon=[icons.url(code) for code in month_days["weather_code"]],
                     sky=[f"{icon} {label}" for icon, label in skies],
                     source=month_days["source"].map(SOURCE_NAMES),
                 )
@@ -799,7 +847,10 @@ if place is not None and cell is not None:
             hours = published.assign(
                 hour=published["time"].dt.strftime("%H"),
                 label=published["time"].dt.strftime("%H:%M %Z"),
-                icon=[icon for icon, _ in skies],
+                icon=[
+                    icons.url(code, by_day=is_day == 1)
+                    for code, is_day in zip(published["weather_code"], published["is_day"], strict=True)
+                ],
                 sky=[f"{icon} {label}" for icon, label in skies],
                 sunshine_min=published["sunshine_s"] / 60,
                 source=published["source"].map(SOURCE_NAMES),
@@ -832,9 +883,13 @@ if place is not None and cell is not None:
                     ],
                 )
             )
-            icons = alt.Chart(plotted).mark_text(dy=-15, fontSize=13).encode(x=hour, y="temperature_c:Q", text="icon:N")
+            images = (
+                alt.Chart(plotted)
+                .mark_image(width=22, height=22, yOffset=-16)
+                .encode(x=hour, y="temperature_c:Q", url="icon:N")
+            )
             charts[0].altair_chart(
-                styled(with_now(temperature + icons), 220, "Hourly weather and temperature"), width="stretch"
+                styled(with_now(temperature + images), 220, "Hourly weather and temperature"), width="stretch"
             )
             precipitation = (
                 alt.Chart(plotted)

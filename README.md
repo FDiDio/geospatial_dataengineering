@@ -262,7 +262,12 @@ so it never blocks the dbt runs.
 
 A **place**, searched by name (e.g. `Milano`, geocoded with OpenStreetMap [Nominatim](https://nominatim.org)), typed
 as coordinates (`45.46, 9.19`) or clicked on the map, gets its weather on **any day since 1940**, Weather Underground
-style, with nothing to ingest: the sky of the day with its icon (from the WMO weather codes of the hours: a thunderstorm
+style, with nothing to ingest. First comes its **forecast at a glance**, as a weather app shows it
+([forecast.py](src/dashboard/forecast.py), a Streamlit component): the next 24 hours and the next 10 days, each with its
+icon, temperatures and precipitation, the days on bars from their low to their high; a day, clicked or tapped, becomes
+the day of the page. The icons are [Meteocons](https://github.com/basmilius/weather-icons) by Bas Milius (MIT,
+[icons.py](src/dashboard/icons.py)), one per WMO code by day and by night: static in the rows and the charts,
+animated beside the day and on the map, with their emoji in the tables. Then the sky of the day (from the WMO weather codes of the hours: a thunderstorm
 by daylight, the precipitation of a wet day, fog, else the daylight cloud cover), its high, low, average,
 precipitation, sunshine, humidity and wind (mean speed at 10 m, dominant direction from the vector sum of the
 hours, strongest gust); its month, with the averages of the highs, lows and

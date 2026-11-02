@@ -14,7 +14,7 @@ import streamlit as st
 from conftest import fake_archive_fetch
 from streamlit.testing.v1 import AppTest
 
-from dashboard import archive, maps, places, queries, terrain
+from dashboard import archive, forecast, icons, maps, places, queries, terrain
 from dashboard.queries import (
     BLUES,
     COLD_ARM,
@@ -197,6 +197,56 @@ def test_the_sky_of_a_weather_code(code, by_day, icon_and_label):
     assert archive.sky(code, by_day) == icon_and_label
 
 
+def test_the_icon_of_a_weather_code():
+    # One per code of the archive, by day and by night; static by default, animated on request
+    assert set(icons.ICONS) == set(archive.WEATHER)
+    assert icons.url(0) == f"{icons.STATIC}clear-day.svg"
+    assert icons.url(0, by_day=False) == f"{icons.STATIC}clear-night.svg"
+    assert icons.url(95, animated=True) == f"{icons.ANIMATED}thunderstorms-day-rain.svg"
+    assert icons.url(4) is None and icons.url(float("nan")) is None
+    # The emoji and label stand in for an icon that does not load
+    image = icons.image(63, 48, shadow=True)
+    assert 'alt="🌧️ Rain"' in image and 'width="48"' in image and icons.SHADOW in image
+    assert icons.image(4, 48) == ""
+
+
+def test_the_forecast_at_a_glance(recorded_fetch):
+    now = pd.Timestamp("2026-10-24 10:30", tz="UTC")  # 12:30 in Zurich
+    weather = archive.fetch_with_forecast(47.37, 8.54, date(2026, 10, 1), date(2026, 11, 7), now=now)
+    data = forecast.data(weather, now, date(2026, 10, 26), "#2a78d6", dark=False)
+
+    # The hours from the current one, 12:00 in Zurich; the day above the first and above midnight
+    hours = data["hours"]
+    assert len(hours) == forecast.HOURS and data["hours_title"] == "Next 24 hours"
+    assert (hours[0]["over"], hours[0]["label"], hours[1]["label"]) == ("Sat", "Now", "13:00")
+    assert hours[12]["label"] == "00:00" and hours[12]["over"] == "Sun" and hours[11]["over"] == ""
+    # 15 + 0.5 °C an hour of the clock; partly cloudy, by day at noon and by night at midnight
+    assert (hours[0]["temperature"], hours[0]["rain"]) == ("21.0°", "0.1 mm")
+    assert hours[0]["icon"].endswith("overcast-day.svg") and hours[12]["icon"].endswith("overcast-night.svg")
+
+    # The days from today, the chosen one marked; no precipitation shown on a dry day
+    days = data["days"]
+    assert len(days) == forecast.DAYS and data["days_title"] == "Next 10 days · click a day for its weather"
+    assert [day["name"] for day in days[:3]] == ["Today", "Tomorrow", "Mon"]
+    assert [day["selected"] for day in days[:4]] == [False, False, True, False]
+    assert (days[0]["date"], days[0]["date_label"], days[0]["high"], days[0]["low"]) == (
+        "2026-10-24",
+        "24 Oct",
+        "49.0°",
+        "39.0°",
+    )
+    assert (days[0]["rain"], days[1]["rain"]) == ("2.0 mm", "")
+    # Bars from the low to the high of each day, on the scale of all the days: 25 + day °C high, 15 + day low
+    assert all(day["top"] >= 0 and day["top"] + day["height"] <= 1 for day in days)
+    # from the 56 °C of the 31st at the top to the 16 °C of 1 Nov at the bottom
+    assert (days[0]["top"], days[0]["height"]) == (pytest.approx(7 / 40), pytest.approx(10 / 40))
+    assert days[7]["top"] == 0.0 and days[8]["top"] + days[8]["height"] == pytest.approx(1.0)
+    assert forecast.data(weather, now, date(2026, 10, 26), "#2a78d6", dark=False, phone=True)["days_title"] == (
+        "Next 10 days · tap a day for its weather"
+    )
+    assert forecast.clicked("2026-10-26") == date(2026, 10, 26) and forecast.clicked(None) is None
+
+
 def test_the_weather_of_a_day_sums_its_hours_up():
     nan = float("nan")
     days = pd.DataFrame(
@@ -355,7 +405,7 @@ def test_reverse_geocoding_names_the_point_or_nothing_at_sea(monkeypatch):
 def test_the_data_of_the_map():
     cell = h3.latlng_to_cell(47.37, 8.54, 7)
     values = [{"h3": h3.latlng_to_cell(47.0, 8.0, 4), "color": [227, 73, 72, 220], "text": "31.2 °C"}]
-    popup = ("Zürich", ["Fri 15 Jul 2022", "☀️ Clear sky"])
+    popup = ("Zürich", ["Fri 15 Jul 2022", "Clear"], icons.url(0, animated=True))
     data = maps.data(
         "dark",
         [220, 225, 235, 40],
@@ -377,7 +427,8 @@ def test_the_data_of_the_map():
         "lng": 8.54,
         "cell": cell,
         "title": "Zürich",
-        "lines": ["Fri 15 Jul 2022", "☀️ Clear sky"],
+        "lines": ["Fri 15 Jul 2022", "Clear"],
+        "icon": "https://cdn.jsdelivr.net/npm/@bybas/weather-icons@2.0.0/production/fill/all/clear-day.svg",
     }
     assert (data["height"], data["phone"], data["values"]) == (380, True, values)
     assert json.loads(json.dumps(data)) == data  # what the browser gets
@@ -530,7 +581,10 @@ def test_dashboard_shows_a_place_without_a_warehouse(monkeypatch, tmp_path):
     assert (wind.value, wind.delta) == ("10.0 km/h", "from W · gusts 45 km/h")
     assert (month["Average wind"], month["Strongest gust"]) == ("12.0 km/h", "61.0 km/h")
     # 15 Jul, an odd day: mainly clear, 6 h of sun under 50 % of clouds, 65 % of humidity
-    assert any(markdown.value == "### 🌤️ Mainly clear" for markdown in app.markdown)
+    # its animated icon beside its name and date, the emoji in its place if it does not load
+    headline = next(html.proto.body for html in app.get("html") if "Friday 15 July 2022" in html.proto.body)
+    assert "Mainly clear" in headline and "production/fill/all/partly-cloudy-day.svg" in headline
+    assert 'alt="🌤️ Mainly clear"' in headline
     sunshine = next(metric for metric in app.metric if metric.label == "Sunshine")
     humidity = next(metric for metric in app.metric if metric.label == "Humidity")
     assert (sunshine.value, sunshine.delta, humidity.value, humidity.delta) == (
@@ -634,6 +688,32 @@ def test_today_is_a_forecast_left_out_of_the_statistics(monkeypatch, tmp_path):
     gone_by = int((days["Source"] != "Forecast").sum())
     if gone_by:
         assert metrics(app.tabs[1])["Wet days"].endswith(f"of {gone_by}")
+
+
+def component_data(app, name):
+    """The data a run gave a component of st.components.v2, as its browser gets it."""
+    element = next(element for element in app.get("bidi_component") if element.proto.component_name == name)
+    return json.loads(element.proto.json)
+
+
+def test_the_forecast_follows_the_day_of_the_page(monkeypatch, tmp_path):
+    app = run_app(monkeypatch, tmp_path)
+    app.sidebar.text_input[0].set_value("Zurich").run(timeout=60)  # on today, the default day
+
+    assert not app.exception
+    days = component_data(app, "forecast")["days"]
+    assert days[0]["name"] == "Today" and days[0]["selected"] and not any(day["selected"] for day in days[1:])
+
+    # A click on a day of the forecast writes it in the day field (take_day): the page shows that day
+    tomorrow = date.today() + timedelta(days=1)
+    app.session_state["day"] = tomorrow
+    app.run(timeout=60)
+    assert not app.exception
+    assert app.sidebar.date_input[0].value == tomorrow
+    assert [day["selected"] for day in component_data(app, "forecast")["days"][:2]] == [False, True]
+    assert any(f"{tomorrow:%A %d %B %Y}" in html.proto.body for html in app.get("html"))
+    # The popup of the map sums up that day too
+    assert component_data(app, "weather_map")["place"]["lines"][0] == f"{tomorrow:%a %d %b %Y}"
 
 
 def test_recenter_and_hexagon_sizes(monkeypatch, tmp_path):
