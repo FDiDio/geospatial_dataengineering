@@ -1,0 +1,25 @@
+name: Keep awake
+
+# A visit to the dashboard every 6 hours, as Community Cloud puts an app to sleep after 12 hours without traffic: one
+# run can be late or missed. See src/dashboard/keep_awake.py. It fails if the app does not show.
+on:
+  schedule:
+    - cron: "23 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  APP_URL: https://climatedata.streamlit.app
+
+jobs:
+  visit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.2
+      # The browser alone: not the dependencies of the project, for a visit
+      - run: uv run --no-project --python 3.12 --with playwright==1.64.1 playwright install --with-deps --only-shell chromium
+      - run: uv run --no-project --python 3.12 --with playwright==1.64.1 python src/dashboard/keep_awake.py "$APP_URL"

@@ -3,9 +3,11 @@ import io
 import json
 import math
 import os
+import types
 import urllib.error
 import urllib.parse
 from datetime import date, timedelta
+from pathlib import Path
 
 import h3
 import numpy as np
@@ -15,7 +17,7 @@ import streamlit as st
 from conftest import fake_archive_fetch
 from streamlit.testing.v1 import AppTest
 
-from dashboard import archive, comfort, forecast, icons, maps, places, queries, terrain
+from dashboard import archive, comfort, forecast, icons, keep_awake, maps, places, queries, terrain
 from dashboard.queries import (
     BLUES,
     COLD_ARM,
@@ -945,3 +947,49 @@ def test_a_day_published_up_to_the_evening_has_no_daily_values(monkeypatch, tmp_
     hours, days, months = (frame.value for frame in app.dataframe)
     assert (len(days), len(months), len(hours)) == (30, 12, 20)
     assert any("up to 19:00" in caption.value for caption in app.caption)
+
+
+class FakeCloud:
+    """A page of Community Cloud, in a frame of itself: an app that sleeps until its button is clicked, or crashed."""
+
+    def __init__(self, sleeping=False, crashed=False):
+        self.sleeping, self.crashed = sleeping, crashed
+        self.frames, self.opened, self.clicks, self.reloading = [self], [], 0, False
+
+    def goto(self, url, **options):
+        self.opened.append(url)
+
+    def wait_for_timeout(self, milliseconds):
+        pass
+
+    def get_by_role(self, role, name):
+        if self.reloading:  # a frame gone as the page reloads, once
+            self.reloading = False
+            raise RuntimeError("Frame was detached")
+        shown = (role == "button") == self.sleeping and not self.crashed
+        return types.SimpleNamespace(count=lambda: int(shown), first=types.SimpleNamespace(click=self.click))
+
+    def click(self):
+        self.clicks += 1
+        self.sleeping, self.reloading = False, True
+
+
+def test_a_visit_to_an_awake_app_clicks_nothing():
+    page = FakeCloud()
+    assert keep_awake.visit(page, "https://app") == "awake"
+    assert page.opened == ["https://app"] and page.clicks == 0
+
+
+def test_a_visit_wakes_a_sleeping_app():
+    page = FakeCloud(sleeping=True)
+    assert keep_awake.visit(page, "https://app") == "woken up"
+    assert page.clicks == 1
+
+
+def test_a_visit_fails_when_the_app_does_not_show():
+    with pytest.raises(TimeoutError, match="'Weather anywhere' did not show at https://app"):
+        keep_awake.visit(FakeCloud(crashed=True), "https://app", start_s=0.01)
+
+
+def test_a_visit_looks_for_the_title_of_the_app():
+    assert f'st.title("{keep_awake.HEADING}")' in Path(APP).with_name("explorer.py").read_text(encoding="utf-8")

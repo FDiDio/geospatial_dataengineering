@@ -6,7 +6,7 @@
 ingested at scale into a lakehouse, explored like Weather Underground on a map of H3 hexagons, and asked in plain
 language to an open LLM that answers with SQL on the data, not from memory.
 
-<!-- Live demo: add the link of the Streamlit Community Cloud app here -->
+**Live demo: [climatedata.streamlit.app](https://climatedata.streamlit.app)**
 <!-- ![The explorer: the weather of a place on a day, with its month, on a map of 2.8 km hexagons](docs/images/explorer.png) -->
 
 ## Why
@@ -480,7 +480,7 @@ docker compose run --rm tests
 
 ### Streamlit Community Cloud
 
-The dashboard runs on [Streamlit Community Cloud](https://share.streamlit.io) from this repository: main file
+The dashboard runs at [climatedata.streamlit.app](https://climatedata.streamlit.app), on [Streamlit Community Cloud](https://share.streamlit.io), from this repository: main file
 `src/dashboard/app.py`, Python 3.12. It installs [src/dashboard/requirements.txt](src/dashboard/requirements.txt), the
 dashboard alone. The explorer needs nothing more. The agent gets its model from [Ollama Cloud](https://ollama.com), the
 same open models served on its GPUs, with a key of an Ollama account. In the secrets of the app, which Streamlit sets
@@ -493,6 +493,13 @@ AGENT_MODEL = "gpt-oss:20b"
 AGENT_MODELS = "gpt-oss:20b"
 AGENT_QUESTIONS_PER_HOUR = "20"   # to all the visitors together: they share the quota of the key and of Open-Meteo
 ```
+
+Community Cloud puts an app to sleep after 12 hours without traffic, and has no setting to keep it up.
+[keep-awake.yml](.github/workflows/keep-awake.yml) visits the dashboard every 6 hours with a headless browser
+([keep_awake.py](src/dashboard/keep_awake.py)), as a plain request gets a 200 and wakes nothing: an app starts with the
+JavaScript of its page and its WebSocket. The visit clicks the wake button if the app sleeps, and fails if the app does
+not show, so that a crash shows in the Actions tab. The home page asks no weather, so it costs no Open-Meteo calls.
+GitHub disables scheduled workflows after 60 days without activity in the repository.
 
 ### Google Cloud with Terraform
 
